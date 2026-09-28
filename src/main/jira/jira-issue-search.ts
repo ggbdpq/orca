@@ -41,8 +41,8 @@ function filterToJql(filter: JiraIssueFilter): string {
 const ALL_ISSUES_JQL = 'resolution = Unresolved ORDER BY updated DESC'
 const ALL_ISSUES_JQL_CLOUD = 'resolution = Unresolved AND updated >= -90d ORDER BY updated DESC'
 
-function jqlForSite(entry: JiraClientForSite, jql: string): string {
-  if (entry.site.authType !== 'server' && jql === ALL_ISSUES_JQL) {
+function jqlForSite(entry: JiraClientForSite, jql: string, boundAll: boolean): string {
+  if (boundAll && entry.site.authType !== 'server') {
     return ALL_ISSUES_JQL_CLOUD
   }
   return jql
@@ -76,14 +76,17 @@ export async function listIssues(
   limit = 30,
   siteId?: JiraSiteSelection | null
 ): Promise<JiraIssue[]> {
-  return searchIssues(filterToJql(filter), limit, siteId)
+  return searchIssues(filterToJql(filter), limit, siteId, undefined, filter === 'all')
 }
 
 export async function searchIssues(
   jql: string,
   limit = 30,
   siteId?: JiraSiteSelection | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // Only the All filter's JQL lacks a restricting clause; caller-provided JQL
+  // is never rewritten even when it happens to equal the All filter's string.
+  boundAllForCloud = false
 ): Promise<JiraIssue[]> {
   const entries = getClients(siteId)
   if (entries.length === 0 || !jql.trim()) {
@@ -100,7 +103,7 @@ export async function searchIssues(
         try {
           return await searchIssuesForClient(
             entry,
-            jqlForSite(entry, jql.trim()),
+            jqlForSite(entry, jql.trim(), boundAllForCloud),
             safeLimit,
             requestSignal
           )

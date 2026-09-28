@@ -284,6 +284,16 @@ describe('Jira issue operations', () => {
     expect(JSON.parse(requestInit.body).jql).toBe('project = ALP ORDER BY updated DESC')
   })
 
+  it('does not rewrite caller-provided JQL that equals the All filter string', async () => {
+    jiraRequestMock.mockResolvedValueOnce({ issues: [] })
+    const { searchIssues } = await import('./issues')
+
+    await searchIssues('resolution = Unresolved ORDER BY updated DESC', 20, 'site-1')
+
+    const requestInit = jiraRequestMock.mock.calls[0][2] as { body: string }
+    expect(JSON.parse(requestInit.body).jql).toBe('resolution = Unresolved ORDER BY updated DESC')
+  })
+
   it('paginates Jira project search results before sorting them', async () => {
     jiraRequestMock
       .mockResolvedValueOnce({
