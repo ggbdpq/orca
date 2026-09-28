@@ -32,7 +32,20 @@ function filterToJql(filter: JiraIssueFilter): string {
   if (filter === 'done') {
     return 'assignee = currentUser() AND resolution IS NOT EMPTY ORDER BY updated DESC'
   }
-  return 'resolution = Unresolved ORDER BY updated DESC'
+  return ALL_ISSUES_JQL
+}
+
+// The "all" filter is the only one without a restricting clause, and Jira Cloud's
+// /rest/api/3/search/jql rejects unbounded queries with a 400. Server/DC's classic
+// /search still accepts it, so the recency bound is applied per site at request time.
+const ALL_ISSUES_JQL = 'resolution = Unresolved ORDER BY updated DESC'
+const ALL_ISSUES_JQL_CLOUD = 'resolution = Unresolved AND updated >= -90d ORDER BY updated DESC'
+
+function jqlForSite(entry: JiraClientForSite, jql: string): string {
+  if (entry.site.authType !== 'server' && jql === ALL_ISSUES_JQL) {
+    return ALL_ISSUES_JQL_CLOUD
+  }
+  return jql
 }
 
 async function searchIssuesForClient(
@@ -85,7 +98,12 @@ export async function searchIssues(
         // Why: queueing on an abandoned search would keep occupying the shared Jira pool.
         await acquire(requestSignal)
         try {
-          return await searchIssuesForClient(entry, jql.trim(), safeLimit, requestSignal)
+          return await searchIssuesForClient(
+            entry,
+            jqlForSite(entry, jql.trim()),
+            safeLimit,
+            requestSignal
+          )
         } catch (error) {
           if (requestSignal.aborted) {
             // Abandoned by the caller: not a site failure, so don't clear tokens or mask a real one.
