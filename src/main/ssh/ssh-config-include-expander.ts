@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir, hostname, userInfo } from 'node:os'
 import { posix, win32 } from 'node:path'
-import { globIncludePattern, MAX_INCLUDE_GLOB_ENTRIES } from './ssh-config-include-glob'
+import { globIncludePattern } from './ssh-config-include-glob'
 
 type PathApi = typeof posix | typeof win32
 
@@ -170,22 +170,19 @@ function resolveIncludePaths(pattern: string, context: IncludeExpansionContext):
   const absolutePattern = resolveIncludePatternPath(withTokens, context)
   if (hasGlobPattern(absolutePattern)) {
     try {
-      const { matches, truncated, truncatedAt } = globIncludePattern(absolutePattern)
+      const { matches, truncationNote } = globIncludePattern(absolutePattern)
       matches.sort((left, right) => left.localeCompare(right))
       // The truncation note rides along on whichever warning fires, so partial
-      // discovery is never presented as the total when the match cap engages.
-      const truncationNote = truncated
-        ? ` (traversal stopped after ${MAX_INCLUDE_GLOB_ENTRIES} entries${truncatedAt ? ` at "${truncatedAt}"` : ''})`
-        : ''
+      // discovery is never presented as the total when a cap engages.
       if (matches.length > MAX_INCLUDE_GLOB_MATCHES) {
         console.warn(
-          `[ssh] Include pattern "${absolutePattern}" matched ${matches.length} files${truncationNote}; processing first ${MAX_INCLUDE_GLOB_MATCHES}`
+          `[ssh] Include pattern "${absolutePattern}" matched ${matches.length} files${truncationNote ?? ''}; processing first ${MAX_INCLUDE_GLOB_MATCHES}`
         )
         return matches.slice(0, MAX_INCLUDE_GLOB_MATCHES)
       }
-      if (truncated) {
+      if (truncationNote !== undefined) {
         console.warn(
-          `[ssh] Include pattern "${absolutePattern}" traversal stopped after ${MAX_INCLUDE_GLOB_ENTRIES} entries; processing ${matches.length} matches`
+          `[ssh] Include pattern "${absolutePattern}"${truncationNote}; processing ${matches.length} matches`
         )
       }
       return matches

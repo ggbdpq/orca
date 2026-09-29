@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { globSync, mkdirSync, mkdtempSync, opendirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { globIncludePattern, MAX_INCLUDE_GLOB_ENTRIES } from './ssh-config-include-glob'
 
 const cleanupDirs: string[] = []
@@ -85,5 +85,160 @@ describe('globIncludePattern', () => {
     expect(truncated).toBe(false)
     expect(matches.some((entry) => entry.endsWith('main.conf'))).toBe(true)
     expect(matches.some((entry) => entry.endsWith('extra.conf'))).toBe(true)
+  })
+
+  it('drains queued trailing-glob matches when the entry budget runs out', () => {
+    const root = makeTempTree()
+    const confDir = join(root, 'conf.d')
+    mkdirSync(confDir)
+    // Direct writes (hard links cap out around 1023 per file on NTFS).
+    for (let index = 0; index <= MAX_INCLUDE_GLOB_ENTRIES; index += 1) {
+      writeFileSync(join(confDir, `${String(index).padStart(5, '0')}.conf`), 'x')
+    }
+
+    const { matches, truncated } = globIncludePattern(`${root.replace(/\\/g, '/')}/conf.d/**`)
+
+    expect(truncated).toBe(true)
+    // Every observed entry stays a match: the 4096 in-budget files plus conf.d
+    // itself (the zero-directory alternative of a trailing `**`).
+    expect(matches.length).toBe(MAX_INCLUDE_GLOB_ENTRIES + 1)
+  })
+
+  it('does not log per-entry debug lines while walking', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const root = makeTempTree()
+    mkdirSync(join(root, 'd'))
+    writeFileSync(join(root, 'd', 'a.conf'), 'Host a')
+
+    globIncludePattern(`${root.replace(/\\/g, '/')}/*/*.conf`)
+
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('routes literal existence checks through the injected fs seam', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, 'main.conf'), 'Host main')
+
+    const { matches } = globIncludePattern(`${root.replace(/\\/g, '/')}/main.conf`, {
+      existsSync: () => false,
+      opendirSync
+    })
+
+    expect(matches).toEqual([])
+  })
+
+  it('keeps comma-less brace groups literal instead of double-prefixing them', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, '{a}.conf'), 'Host a')
+    writeFileSync(join(root, '{x}.confa'), 'Host xa')
+    writeFileSync(join(root, '{x}.confb'), 'Host xb')
+
+    const single = globIncludePattern(`${root.replace(/\\/g, '/')}/{a}.conf`)
+    const mixed = globIncludePattern(`${root.replace(/\\/g, '/')}/{x}.conf{a,b}`)
+
+    expect(single.matches).toEqual([`${root.replace(/\\/g, '/')}/{a}.conf`])
+    expect(mixed.matches).toEqual([
+      `${root.replace(/\\/g, '/')}/{x}.confa`,
+      `${root.replace(/\\/g, '/')}/{x}.confb`
+    ])
+  })
+
+  it('treats a leading caret in a character class as negation like globSync', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, 'a.txt'), 'x')
+    writeFileSync(join(root, 'b.txt'), 'x')
+
+    const { matches } = globIncludePattern(`${root.replace(/\\/g, '/')}/[^a]*`)
+
+    expect(matches).toEqual([`${root.replace(/\\/g, '/')}/b.txt`])
+  })
+
+  it('drops alternatives with invalid character-class ranges instead of failing the pattern', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, 'b.txt'), 'x')
+
+    const invalid = globIncludePattern(`${root.replace(/\\/g, '/')}/[z-a]*`)
+    const mixed = globIncludePattern(`${root.replace(/\\/g, '/')}/{[z-a],b}*`)
+
+    expect(invalid).toEqual({ matches: [], truncated: false })
+    expect(mixed.matches).toEqual([`${root.replace(/\\/g, '/')}/b.txt`])
+  })
+
+  it('reports when brace expansion is capped', () => {
+    const root = makeTempTree()
+    const groups = '{1,2,3}{1,2,3}{1,2,3}{1,2,3}'
+
+    const { matches, truncated, truncationNote } = globIncludePattern(
+      `${root.replace(/\\/g, '/')}/${groups}/x.conf`
+    )
+
+    expect(matches).toEqual([])
+    expect(truncated).toBe(true)
+    expect(truncationNote).toBe(' (brace expansion stopped at 64 alternatives)')
+  })
+
+  it('matches pathological wildcard segments in linear time', () => {
+    const root = makeTempTree()
+    mkdirSync(join(root, 'd'))
+    writeFileSync(join(root, 'd', `${'a'.repeat(48)}z`), 'x')
+    writeFileSync(join(root, 'd', 'xaaxaaxaaxaaxaaxaab'), 'x')
+
+    const started = Date.now()
+    const { matches } = globIncludePattern(`${root.replace(/\\/g, '/')}/d/${'*a'.repeat(8)}*b`)
+    const elapsed = Date.now() - started
+
+    expect(elapsed).toBeLessThan(2000)
+    expect(matches).toEqual([`${root.replace(/\\/g, '/')}/d/xaaxaaxaaxaaxaaxaab`])
+  })
+
+  it('agrees with globSync across assorted segment shapes', () => {
+    const root = makeTempTree()
+    const dir = join(root, 'd')
+    mkdirSync(dir)
+    const names = [
+      'a.txt',
+      'b.txt',
+      'ab.txt',
+      'ba.txt',
+      'z.txt',
+      '^z.txt',
+      'xaay.txt',
+      'xaaby.txt',
+      'cab1.txt',
+      'cab2.txt',
+      'daz.txt',
+      'dbz.txt',
+      `long${'a'.repeat(40)}z.txt`,
+      'literal{a}.txt'
+    ]
+    for (const name of names) {
+      writeFileSync(join(dir, name), 'x')
+    }
+
+    // Case-consistent patterns only: node's globSync is case-insensitive on
+    // case-insensitive filesystems while this walker stays case-sensitive.
+    const patterns = [
+      '[^a]*',
+      '[!a]*',
+      '[a-b]*',
+      '[b-d]*.txt',
+      '*a*y',
+      '*a*b*',
+      '*a*a*a*a*a*y',
+      '?.txt',
+      'literal{a}.txt',
+      '[z-a]*',
+      '[c*]*',
+      '*[0-9].txt',
+      'xa?by.txt'
+    ]
+    for (const pattern of patterns) {
+      const expected = globSync(`${root.replace(/\\/g, '/')}/d/${pattern}`)
+        .map((path) => path.split(/[\\/]/).pop())
+        .sort()
+      const { matches } = globIncludePattern(`${root.replace(/\\/g, '/')}/d/${pattern}`)
+      const actual = matches.map((path) => path.split(/[\\/]/).pop()).sort()
+      expect(actual, `pattern ${pattern}`).toEqual(expected)
+    }
   })
 })

@@ -256,6 +256,50 @@ describe('loadUserSshConfig regressions', () => {
     }
   })
 
+  it('warns when include brace alternatives exceed the expansion cap', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const home = mkdtempSync(join(tmpdir(), 'orca-ssh-brace-cap-'))
+    try {
+      mkdirSync(join(home, '.ssh', 'comb'), { recursive: true })
+      writeFileSync(
+        join(home, '.ssh', 'config'),
+        'Include ~/.ssh/comb/{1,2,3,4,5,6,7,8,9}{1,2,3,4,5,6,7,8,9}/*.conf\n'
+      )
+
+      await mockOs(home)
+
+      await loadUserSshConfig()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('brace expansion'))
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('warns when entry-budget truncation combines with the match cap', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // Real filesystem: 4100 matches exceed the 4096-entry traversal budget, so
+    // the expander must surface the truncation note on top of the 256-match cap
+    // instead of silently dropping the rest of the include.
+    const home = mkdtempSync(join(tmpdir(), 'orca-ssh-budget-cap-'))
+    try {
+      const confDir = join(home, '.ssh', 'conf.d')
+      mkdirSync(confDir, { recursive: true })
+      writeFileSync(join(home, '.ssh', 'config'), 'Include conf.d/*.conf\n')
+      for (let index = 0; index < 4100; index += 1) {
+        writeFileSync(join(confDir, `${String(index).padStart(4, '0')}.conf`), `Host h-${index}\n`)
+      }
+
+      await mockOs(home)
+
+      const hosts = await loadUserSshConfig()
+      expect(hosts.length).toBe(256)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('matched'))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('traversal stopped'))
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   // Bounds discovery over large trees is covered end to end by
   // ssh-config-include-glob.test.ts (4096-entry budget against a real
   // filesystem); the fs-mock variant of that scenario never worked because

@@ -1,5 +1,6 @@
 import { existsSync, globSync as nodeGlobSync, opendirSync } from 'node:fs'
 import type { Dir, Dirent } from 'node:fs'
+import { compileSegmentMatcher } from './ssh-config-include-glob-segment-matcher'
 
 // Local alias so the relative-pattern fallback reads cleanly beside the
 // per-segment walker below.
@@ -22,8 +23,8 @@ const globSync = (relativePattern: string): string[] => nodeGlobSync(relativePat
 export const MAX_INCLUDE_GLOB_ENTRIES = 4096
 
 // Brace groups multiply combinatorially; beyond this cap remaining groups stay
-// literal so a pathological pattern cannot explode during expansion.
-const MAX_INCLUDE_GLOB_ALTERNATIVES = 64
+// literal so a pathological pattern cannot explode during pattern expansion.
+export const MAX_INCLUDE_GLOB_ALTERNATIVES = 64
 
 const GLOB_ROOT_PATTERN = /^(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+|[\\/])/
 
@@ -31,6 +32,8 @@ export type GlobIncludeResult = {
   matches: string[]
   truncated: boolean
   truncatedAt?: string
+  // Formatted for warning output; present only when a truncation engaged.
+  truncationNote?: string
 }
 
 type GlobBudget = { remaining: number; truncatedAt?: string }
@@ -53,7 +56,14 @@ export function globIncludePattern(
   const matches: string[] = []
   const budget: GlobBudget = { remaining: MAX_INCLUDE_GLOB_ENTRIES }
   let truncated = false
-  for (const alternative of expandBraceAlternatives(pattern, MAX_INCLUDE_GLOB_ALTERNATIVES)) {
+  let budgetTruncated = false
+  let braceTruncated = false
+  const expansion = expandBraceAlternatives(pattern, MAX_INCLUDE_GLOB_ALTERNATIVES)
+  if (expansion.truncated) {
+    truncated = true
+    braceTruncated = true
+  }
+  for (const alternative of expansion.alternatives) {
     const root = alternative.match(GLOB_ROOT_PATTERN)?.[0]
     if (root === undefined) {
       // Relative patterns only reach this function when token expansion leaves
@@ -68,9 +78,26 @@ export function globIncludePattern(
       .filter((segment) => segment.length > 0)
     if (!walkSegments(root, segments, separator, matches, budget, fsDeps)) {
       truncated = true
+      budgetTruncated = true
     }
   }
-  return { matches, truncated, truncatedAt: budget.truncatedAt }
+  // The two truncation sources get their own note so a brace cap never claims
+  // an entry-budget traversal stopped.
+  const truncationNotes: string[] = []
+  if (budgetTruncated) {
+    truncationNotes.push(
+      `traversal stopped after ${MAX_INCLUDE_GLOB_ENTRIES} entries${budget.truncatedAt ? ` at "${budget.truncatedAt}"` : ''}`
+    )
+  }
+  if (braceTruncated) {
+    truncationNotes.push(`brace expansion stopped at ${MAX_INCLUDE_GLOB_ALTERNATIVES} alternatives`)
+  }
+  return {
+    matches,
+    truncated,
+    truncatedAt: budget.truncatedAt,
+    truncationNote: truncationNotes.length > 0 ? ` (${truncationNotes.join('; ')})` : undefined
+  }
 }
 
 function walkSegments(
@@ -83,13 +110,15 @@ function walkSegments(
 ): boolean {
   const stack: StackEntry[] = [{ dir: startDir, index: 0 }]
   while (stack.length > 0) {
-    if (budget.remaining <= 0) {
-      budget.truncatedAt ??= stack.at(-1)?.dir
-      return false
-    }
     const { dir, index } = stack.pop() as StackEntry
     if (index === segments.length) {
       matches.push(dir)
+      continue
+    }
+    if (budget.remaining <= 0) {
+      // Budget exhausted: already-queued terminal matches above still drain,
+      // but no new directory reads start.
+      budget.truncatedAt ??= dir
       continue
     }
 
@@ -113,11 +142,6 @@ function walkSegments(
           stack.push({ dir: childPath, index: index + 1 })
         }
       }
-      if (budget.remaining <= 0) {
-        // The generator stopped early; a stack-empty exit below would mask it.
-        budget.truncatedAt ??= dir
-        return false
-      }
       continue
     }
 
@@ -129,7 +153,7 @@ function walkSegments(
           // Dot entries are skipped to match globSync's default behavior.
           continue
         }
-        if (!matcher.test(entry.name)) {
+        if (!matcher(entry.name)) {
           continue
         }
         const childPath = joinGlobPath(dir, entry.name, separator)
@@ -139,23 +163,19 @@ function walkSegments(
           stack.push({ dir: childPath, index: index + 1 })
         }
       }
-      if (budget.remaining <= 0) {
-        budget.truncatedAt ??= dir
-        return false
-      }
       continue
     }
 
     const childPath = joinGlobPath(dir, segment, separator)
     if (index + 1 === segments.length) {
-      if (existsSync(childPath)) {
+      if (fsDeps.existsSync(childPath)) {
         matches.push(childPath)
       }
       continue
     }
     stack.push({ dir: childPath, index: index + 1 })
   }
-  return true
+  return budget.remaining > 0
 }
 
 // Yields directory entries one at a time, charging the shared budget for each
@@ -193,7 +213,6 @@ function* readEntriesBounded(
         budget.truncatedAt ??= dir
         return
       }
-      console.error(JSON.stringify(entry.name), 'matcher-pass pending')
       yield entry
     }
   } finally {
@@ -205,110 +224,47 @@ function* readEntriesBounded(
   }
 }
 
+type BraceExpansion = { alternatives: string[]; truncated: boolean }
+
 // Expands `{a,b}` alternatives outside-in, left to right. Groups without a
 // comma stay literal, and expansion stops at `remaining` alternatives so a
 // pathological number of groups cannot explode the pattern list.
-function expandBraceAlternatives(pattern: string, remaining: number): string[] {
+function expandBraceAlternatives(pattern: string, remaining: number): BraceExpansion {
   return expandBracesFrom(pattern, 0, remaining)
 }
 
-function expandBracesFrom(pattern: string, from: number, remaining: number): string[] {
+function expandBracesFrom(pattern: string, from: number, remaining: number): BraceExpansion {
   if (remaining <= 0) {
-    return [pattern]
+    return { alternatives: [pattern], truncated: true }
   }
   const open = pattern.indexOf('{', from)
   if (open === -1) {
-    return [pattern]
+    return { alternatives: [pattern], truncated: false }
   }
   const close = pattern.indexOf('}', open + 1)
   if (close === -1) {
-    return [pattern]
+    return { alternatives: [pattern], truncated: false }
   }
   const prefix = pattern.slice(0, open)
   const suffix = pattern.slice(close + 1)
   const parts = pattern.slice(open + 1, close).split(',')
   if (parts.length < 2) {
     // Nothing to expand: keep this group literal and resume scanning after it
-    // (scanning from `close + 1` guarantees progress on degenerate groups).
-    const rest = expandBracesFrom(pattern, close + 1, remaining)
-    return rest.map((candidate) => pattern.slice(0, close + 1) + candidate)
+    // (the recursive candidates already carry the full pattern prefix).
+    return expandBracesFrom(pattern, close + 1, remaining)
   }
   const alternatives: string[] = []
+  let truncated = false
   for (const part of parts) {
     if (alternatives.length >= remaining) {
+      truncated = true
       break
     }
-    alternatives.push(
-      ...expandBracesFrom(`${prefix}${part}${suffix}`, 0, remaining - alternatives.length)
-    )
+    const nested = expandBracesFrom(`${prefix}${part}${suffix}`, 0, remaining - alternatives.length)
+    alternatives.push(...nested.alternatives)
+    truncated ||= nested.truncated
   }
-  return alternatives
-}
-
-// Compiles one glob segment (`*`, `?`, `[...]`, literals) into an anchored
-// case-sensitive matcher with the same segment semantics as `globSync`.
-function compileSegmentMatcher(segment: string): RegExp {
-  let source = '^'
-  let index = 0
-  while (index < segment.length) {
-    const char = segment[index]
-    if (char === '*') {
-      source += '[^/\\\\]*'
-      index += 1
-      continue
-    }
-    if (char === '?') {
-      source += '[^/\\\\]'
-      index += 1
-      continue
-    }
-    if (char === '[') {
-      const closing = findCharClassEnd(segment, index)
-      if (closing === undefined) {
-        // Unterminated class: globSync treats the bracket as a literal too.
-        source += '\\['
-        index += 1
-        continue
-      }
-      source += compileCharClass(segment.slice(index + 1, closing))
-      index = closing + 1
-      continue
-    }
-    source += escapeRegExpChar(char)
-    index += 1
-  }
-  return new RegExp(`${source}$`)
-}
-
-function findCharClassEnd(segment: string, open: number): number | undefined {
-  let index = open + 1
-  // A leading `!`, `^`, or `]` belongs to the class header, not its members.
-  if (segment[index] === '!' || segment[index] === '^' || segment[index] === ']') {
-    index += 1
-  }
-  while (index < segment.length) {
-    if (segment[index] === ']') {
-      return index
-    }
-    index += 1
-  }
-  return undefined
-}
-
-function compileCharClass(body: string): string {
-  let negated = false
-  if (body.startsWith('!')) {
-    negated = true
-    body = body.slice(1)
-  } else if (body.startsWith('^')) {
-    // A literal `^` inside a glob class must not become a regex negation.
-    body = `\\${body}`
-  }
-  return `[${negated ? '^' : ''}${body.replace(/[\\\]]/g, '\\$&')}]`
-}
-
-function escapeRegExpChar(char: string): string {
-  return /[.*+?^${}()|[\]\\]/.test(char) ? `\\${char}` : char
+  return { alternatives, truncated }
 }
 
 function hasGlobPattern(input: string): boolean {
