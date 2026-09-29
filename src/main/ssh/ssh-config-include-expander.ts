@@ -170,11 +170,16 @@ function resolveIncludePaths(pattern: string, context: IncludeExpansionContext):
   const absolutePattern = resolveIncludePatternPath(withTokens, context)
   if (hasGlobPattern(absolutePattern)) {
     try {
-      const { matches, truncated } = globIncludePattern(absolutePattern)
+      const { matches, truncated, truncatedAt } = globIncludePattern(absolutePattern)
       matches.sort((left, right) => left.localeCompare(right))
+      // The truncation note rides along on whichever warning fires, so partial
+      // discovery is never presented as the total when the match cap engages.
+      const truncationNote = truncated
+        ? ` (traversal stopped after ${MAX_INCLUDE_GLOB_ENTRIES} entries${truncatedAt ? ` at "${truncatedAt}"` : ''})`
+        : ''
       if (matches.length > MAX_INCLUDE_GLOB_MATCHES) {
         console.warn(
-          `[ssh] Include pattern "${absolutePattern}" matched ${matches.length} files; processing first ${MAX_INCLUDE_GLOB_MATCHES}`
+          `[ssh] Include pattern "${absolutePattern}" matched ${matches.length} files${truncationNote}; processing first ${MAX_INCLUDE_GLOB_MATCHES}`
         )
         return matches.slice(0, MAX_INCLUDE_GLOB_MATCHES)
       }
