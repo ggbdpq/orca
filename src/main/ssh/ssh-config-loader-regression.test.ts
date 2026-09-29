@@ -1,6 +1,8 @@
 import type * as FsModule from 'node:fs'
 import type * as OsModule from 'node:os'
-import { win32 } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, win32 } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 afterEach(() => {
@@ -275,5 +277,138 @@ describe('loadUserSshConfig regressions', () => {
     expect(await loadUserSshConfig()).toEqual([{ host: 'safe', hostname: 'safe.example.com' }])
     expect(oversizedReadSpy).not.toHaveBeenCalled()
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('exceeds'))
+  })
+
+  it('expands recursive include globs across nested directories', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const home = mkdtempSync(join(tmpdir(), 'orca-ssh-include-glob-'))
+    try {
+      const confDir = join(home, '.ssh', 'conf.d')
+      mkdirSync(join(confDir, 'nested'), { recursive: true })
+      writeFileSync(join(home, '.ssh', 'config'), 'Include ~/.ssh/conf.d/**/*.conf\n')
+      writeFileSync(join(confDir, 'alpha.conf'), 'Host alpha\n  HostName alpha.example.com\n')
+      writeFileSync(
+        join(confDir, 'nested', 'gamma.conf'),
+        'Host gamma\n  HostName gamma.example.com\n'
+      )
+
+      await mockOs(home)
+
+      expect(await loadUserSshConfig()).toEqual([
+        { host: 'alpha', hostname: 'alpha.example.com' },
+        { host: 'gamma', hostname: 'gamma.example.com' }
+      ])
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds discovery of recursive include globs on large trees', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const home = platformSshHome()
+    const configPath = platformSshPath(home, '.ssh/config')
+    const treeRoot = platformSshPath(home, '.ssh/tree')
+    const treeSeparator = treeRoot.includes('\\') ? '\\' : '/'
+    const joinTree = (parent: string, name: string) => `${parent}${treeSeparator}${name}`
+
+    const dirNames = Array.from(
+      { length: 80 },
+      (_, index) => `level-${String(index).padStart(2, '0')}`
+    )
+    const fillersPerDir = 300
+    const dirEntries = new Map<string, { dirs: string[]; confs: string[]; fillerCount: number }>()
+    dirEntries.set(treeRoot, { dirs: dirNames, confs: [], fillerCount: 0 })
+    const allConfPaths: string[] = []
+    for (const dirName of dirNames) {
+      const dir = joinTree(treeRoot, dirName)
+      const confName = `a-${dirName}.conf`
+      dirEntries.set(dir, { dirs: [], confs: [confName], fillerCount: fillersPerDir })
+      allConfPaths.push(joinTree(dir, confName))
+    }
+    const totalTreeEntries = dirNames.length * (fillersPerDir + 1) + dirNames.length
+    let listed = 0
+
+    await mockOs(home)
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof FsModule>('fs')
+      return {
+        ...actual,
+        existsSync: (filePath: string) =>
+          filePath === configPath || allConfPaths.includes(filePath),
+        globSync: (pattern: string) => {
+          const separatorIndex = Math.max(pattern.lastIndexOf('\\'), pattern.lastIndexOf('/'))
+          const dir = pattern.slice(0, separatorIndex)
+          const segment = pattern.slice(separatorIndex + 1)
+          const info = dirEntries.get(dir)
+          if (!info) {
+            // Simulates the unbounded enumeration of a single broad glob call.
+            listed += totalTreeEntries
+            return [...allConfPaths].toReversed()
+          }
+          const names = [...info.dirs, ...info.confs]
+          listed += names.length + info.fillerCount
+          if (segment === '*.conf') {
+            return names.filter((name) => name.endsWith('.conf')).map((name) => joinTree(dir, name))
+          }
+          return []
+        },
+        readdirSync: (dir: string) => {
+          const info = dirEntries.get(dir)
+          if (!info) {
+            throw new Error(`ENOENT: ${dir}`)
+          }
+          const fillerNames = Array.from(
+            { length: info.fillerCount },
+            (_, index) => `filler-${String(index).padStart(3, '0')}.txt`
+          )
+          const entries = [
+            ...info.dirs.map((name) => ({
+              name,
+              isDirectory: () => true,
+              isFile: () => false,
+              parentPath: dir
+            })),
+            ...info.confs.map((name) => ({
+              name,
+              isDirectory: () => false,
+              isFile: () => true,
+              parentPath: dir
+            })),
+            ...fillerNames.map((name) => ({
+              name,
+              isDirectory: () => false,
+              isFile: () => true,
+              parentPath: dir
+            }))
+          ]
+          listed += entries.length
+          return entries
+        },
+        readFileSync: (filePath: string) => {
+          if (filePath === configPath) {
+            return 'Include ~/.ssh/tree/**/*.conf\n'
+          }
+          if (allConfPaths.includes(filePath)) {
+            const confName = filePath.slice(filePath.lastIndexOf(treeSeparator) + 1)
+            return `Host ${confName.replace(/\.conf$/, '')}\n  HostName ${confName}.example.com\n`
+          }
+          throw new Error(`ENOENT: ${filePath}`)
+        },
+        realpathSync: Object.assign((filePath: string) => filePath, {
+          native: (filePath: string) => filePath
+        }),
+        statSync: (filePath: string) => ({
+          isFile: () => filePath === configPath || allConfPaths.includes(filePath),
+          size: 64
+        })
+      }
+    })
+
+    const hosts = await loadUserSshConfig()
+    expect(hosts.length).toBeGreaterThan(0)
+    expect(hosts.length).toBeLessThan(dirNames.length)
+    expect(listed).toBeLessThan(totalTreeEntries)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stopped after'))
   })
 })
