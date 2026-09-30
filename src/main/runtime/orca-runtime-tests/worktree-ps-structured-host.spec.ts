@@ -60,6 +60,9 @@ describe('worktree ps reads structured sessions from the agent-status store', ()
       prompt: 'ship the thing',
       structuredHostOwned: true
     })
+    // Null would tell a reader "looked, no wait"; a structured worker has no terminal to look at,
+    // so the field must stay absent (same contract as worker-observation.ts).
+    expect(worktree?.agents[0]).not.toHaveProperty('agentWait')
     expect(worktree?.status).toBe('working')
     expect(getAgentStatusSnapshot).toHaveBeenCalledTimes(1)
   })
