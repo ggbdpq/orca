@@ -1,7 +1,12 @@
 import { makeStructuredAgentStatusSubject } from '../../../shared/agent-status-subject'
+import { makePaneKey } from '../../../shared/stable-pane-id'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { OrcaRuntimeService } from '../orca-runtime-test-mocks.spec'
-import { TEST_WORKTREE_ID, store } from '../orca-runtime-test-fixtures.spec'
+import {
+  MOCK_GIT_WORKTREES,
+  OrcaRuntimeService,
+  scanLocalRepoWorktreesForResolutionMock
+} from '../orca-runtime-test-mocks.spec'
+import { TEST_WORKTREE_ID, TEST_WORKTREE_PATH, store } from '../orca-runtime-test-fixtures.spec'
 import { AgentHookServer, _internals } from '../../agent-hooks/server'
 
 vi.mock('../../telemetry/client', () => ({ track: vi.fn() }))
@@ -28,6 +33,12 @@ const SUBJECT = makeStructuredAgentStatusSubject(
 
 beforeEach(() => {
   _internals.resetCachesForTests()
+  // The scan mock ships unconfigured, so without this the resolved-worktree snapshot is empty
+  // and every case here lists nothing. Same inventory the fixture store declares.
+  scanLocalRepoWorktreesForResolutionMock.mockResolvedValue({
+    ok: true,
+    worktrees: MOCK_GIT_WORKTREES
+  })
 })
 
 describe('worktree ps reads structured sessions from the agent-status store', () => {
@@ -90,5 +101,82 @@ describe('worktree ps reads structured sessions from the agent-status store', ()
     expect(worktree).toBeDefined()
     expect(worktree?.agents).toEqual([])
     expect(worktree?.status).not.toBe('permission')
+  })
+})
+
+describe('worktree ps resolves pty agent rows through the real sweep', () => {
+  /**
+   * The wait threading lives behind an `attachRuntimeWorktreeAgentRowWaits(...)` call inside the
+   * `@ts-nocheck` assembly above, so the helper suites that compose it by hand stay green if that
+   * wiring regresses. These drive a handle-carrying hook row through the production read.
+   */
+  async function makeRuntimeWithPtyAgentRow(state: 'waiting' | 'working') {
+    const statusStore = new AgentHookServer()
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => statusStore.getStatusSnapshot()
+    })
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-ps-agent-wait' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'claude',
+      title: 'worker'
+    })
+    statusStore.ingestTerminalStatus({
+      paneKey: makePaneKey('tab-ps-wait', '22222222-2222-4222-8222-222222222222'),
+      tabId: 'tab-ps-wait',
+      worktreeId: TEST_WORKTREE_ID,
+      connectionId: null,
+      terminalHandle: handle,
+      payload: { state, prompt: 'review the PR', agentType: 'claude' }
+    })
+    return { runtime, handle }
+  }
+
+  it('threads a resolved wait descriptor onto the pty row', async () => {
+    const { runtime, handle } = await makeRuntimeWithPtyAgentRow('waiting')
+    const getWait = vi.spyOn(runtime, 'getTerminalInteractiveWait').mockResolvedValue({
+      source: 'prompt-text',
+      reason: 'clarify'
+    })
+
+    const { worktrees } = await runtime.getWorktreePs()
+
+    expect(getWait).toHaveBeenCalledWith(handle)
+    const worktree = worktrees.find((entry) => entry.worktreeId === TEST_WORKTREE_ID)
+    expect(worktree?.agents).toHaveLength(1)
+    expect(worktree?.agents[0]).toMatchObject({
+      state: 'waiting',
+      agentWait: { source: 'prompt-text', reason: 'clarify' }
+    })
+  })
+
+  it('resolves a populated hook wait through the real getter', async () => {
+    const { runtime } = await makeRuntimeWithPtyAgentRow('waiting')
+
+    const { worktrees } = await runtime.getWorktreePs()
+
+    const worktree = worktrees.find((entry) => entry.worktreeId === TEST_WORKTREE_ID)
+    expect(worktree?.agents).toHaveLength(1)
+    // No stub anywhere: the row's handle flows through attachRuntimeWorktreeAgentRowWaits into
+    // the real getTerminalInteractiveWait, whose hook branch probes the PTY and reports the wait.
+    expect(worktree?.agents[0]?.agentWait).toMatchObject({ source: 'hook' })
+  })
+
+  it('carries an explicit null when the real getter looks and finds no wait', async () => {
+    const { runtime } = await makeRuntimeWithPtyAgentRow('working')
+
+    const { worktrees } = await runtime.getWorktreePs()
+
+    const worktree = worktrees.find((entry) => entry.worktreeId === TEST_WORKTREE_ID)
+    expect(worktree?.agents).toHaveLength(1)
+    // Null means the sweep looked through the terminal and found no wait; only a row whose handle
+    // could not be evaluated at all keeps the field absent.
+    expect(worktree?.agents[0]?.agentWait).toBeNull()
   })
 })
