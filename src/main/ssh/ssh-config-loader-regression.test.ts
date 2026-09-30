@@ -48,8 +48,12 @@ async function loadUserSshConfig() {
   return mod.loadUserSshConfig()
 }
 
+const isWindows = process.platform === 'win32'
+
 describe('loadUserSshConfig regressions', () => {
-  it('supports Windows-style home paths and include separators', async () => {
+  // Windows-only: under a POSIX temp home getPathApi picks the posix branch,
+  // where the backslash includes stay literal filenames and never resolve.
+  it.skipIf(!isWindows)('supports Windows-style home paths and include separators', async () => {
     // Real filesystem: the per-segment walker reads through `opendirSync`, which
     // node:fs module mocks in this pool do not intercept.
     const home = mkdtempSync(join(tmpdir(), 'orca-ssh-win-sep-'))
