@@ -65,6 +65,13 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   '.trigger': 'apex',
   '.apex': 'apex',
   '.rb': 'ruby',
+  // Why: Monaco's ruby registration claims only .rb/.rbx/.rjs/.gemspec/.pp, but these are
+  // plain Ruby in every Rails/Rack/Thor project (and Rakefile/Gemfile are already covered
+  // by filename), so without them the files open as plaintext.
+  '.rake': 'ruby',
+  '.ru': 'ruby',
+  '.jbuilder': 'ruby',
+  '.thor': 'ruby',
   '.php': 'php',
   '.swift': 'swift',
   '.sh': 'shell',
@@ -136,7 +143,14 @@ const FILENAME_TO_LANGUAGE: Record<string, string> = {
   '.zshenv': 'shell',
   '.zprofile': 'shell',
   '.zlogin': 'shell',
-  '.zlogout': 'shell'
+  '.zlogout': 'shell',
+  // Why: Ruby DSL files whose detection is by name; they parse as Ruby but Monaco's ruby
+  // registration only lists rakefile/Gemfile.
+  Guardfile: 'ruby',
+  Capfile: 'ruby',
+  Podfile: 'ruby',
+  Brewfile: 'ruby',
+  Vagrantfile: 'ruby'
 }
 
 // Exact match wins; lowercase map covers case-insensitive filesystems.
