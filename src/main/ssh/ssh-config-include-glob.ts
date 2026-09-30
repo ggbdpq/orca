@@ -175,7 +175,9 @@ function walkSegments(
     }
     stack.push({ dir: childPath, index: index + 1 })
   }
-  return budget.remaining > 0
+  // A complete walk can land exactly on the budget; only a real drop (an entry
+  // or queued read discarded) marks truncation.
+  return budget.truncatedAt === undefined
 }
 
 // Yields directory entries one at a time, charging the shared budget for each

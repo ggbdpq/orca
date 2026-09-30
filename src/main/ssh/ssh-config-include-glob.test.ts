@@ -104,6 +104,26 @@ describe('globIncludePattern', () => {
     expect(matches.length).toBe(MAX_INCLUDE_GLOB_ENTRIES + 1)
   })
 
+  it('reports no truncation when the walk completes exactly at the entry budget', () => {
+    const root = makeTempTree()
+    const confDir = join(root, 'conf.d')
+    mkdirSync(confDir)
+    // Direct writes (hard links cap out around 1023 per file on NTFS).
+    for (let index = 0; index < MAX_INCLUDE_GLOB_ENTRIES; index += 1) {
+      writeFileSync(join(confDir, `${String(index).padStart(5, '0')}.conf`), 'x')
+    }
+
+    const { matches, truncated, truncationNote } = globIncludePattern(
+      `${root.replace(/\\/g, '/')}/conf.d/*.conf`
+    )
+
+    // A walk that observes exactly the budget and drops nothing is complete;
+    // only a real drop may claim the traversal stopped.
+    expect(truncated).toBe(false)
+    expect(truncationNote).toBeUndefined()
+    expect(matches.length).toBe(MAX_INCLUDE_GLOB_ENTRIES)
+  })
+
   it('does not log per-entry debug lines while walking', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const root = makeTempTree()
