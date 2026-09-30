@@ -148,8 +148,12 @@ function walkSegments(
     if (hasGlobPattern(segment)) {
       const isLastSegment = index + 1 === segments.length
       const matcher = compileSegmentMatcher(segment)
+      // globSync only lets dot entries participate when the segment itself is
+      // dot-explicit (a leading `.` or `[.]` class); implicit wildcards
+      // (`*`, `?`, other classes) keep excluding them.
+      const allowsDotEntries = segment.startsWith('.') || segment.startsWith('[.]')
       for (const entry of readEntriesBounded(dir, budget, fsDeps)) {
-        if (entry.name.startsWith('.')) {
+        if (entry.name.startsWith('.') && !allowsDotEntries) {
           // Dot entries are skipped to match globSync's default behavior.
           continue
         }

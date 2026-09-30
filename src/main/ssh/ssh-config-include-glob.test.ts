@@ -211,6 +211,51 @@ describe('globIncludePattern', () => {
     expect(matches).toEqual([`${root.replace(/\\/g, '/')}/d/xaaxaaxaaxaaxaaxaab`])
   })
 
+  it('matches dot entries when the wildcard segment itself starts with a dot', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, '.host1.conf'), 'Host dot')
+    writeFileSync(join(root, 'host2.conf'), 'Host plain')
+
+    const dotLeading = globIncludePattern(`${root.replace(/\\/g, '/')}/.host*.conf`)
+    const bracketDot = globIncludePattern(`${root.replace(/\\/g, '/')}/[.]host*.conf`)
+
+    expect(dotLeading.matches).toEqual([`${root.replace(/\\/g, '/')}/.host1.conf`])
+    expect(bracketDot.matches).toEqual([`${root.replace(/\\/g, '/')}/.host1.conf`])
+  })
+
+  it('matches dot directories through a dot-leading mid-pattern segment', () => {
+    const root = makeTempTree()
+    mkdirSync(join(root, '.subdir'))
+    writeFileSync(join(root, '.subdir', 'inner.conf'), 'Host inner')
+
+    const { matches } = globIncludePattern(`${root.replace(/\\/g, '/')}/.*/inner.conf`)
+
+    expect(matches).toEqual([`${root.replace(/\\/g, '/')}/.subdir/inner.conf`])
+  })
+
+  it('keeps implicit wildcards and recursion excluding dot entries', () => {
+    const root = makeTempTree()
+    writeFileSync(join(root, '.hidden.conf'), 'x')
+    writeFileSync(join(root, 'visible.conf'), 'x')
+    mkdirSync(join(root, '.sub'))
+    writeFileSync(join(root, '.sub', 'hidden-inner.conf'), 'x')
+    mkdirSync(join(root, 'sub'))
+    writeFileSync(join(root, 'sub', 'inner.conf'), 'x')
+
+    const rootPath = `${root.replace(/\\/g, '/')}`
+    const baseNames = (result: { matches: string[] }) =>
+      result.matches.map((path) => path.split(/[\\/]/).pop())
+
+    expect(baseNames(globIncludePattern(`${rootPath}/*.conf`))).toEqual(['visible.conf'])
+    expect(baseNames(globIncludePattern(`${rootPath}/**/*.conf`)).sort()).toEqual([
+      'inner.conf',
+      'visible.conf'
+    ])
+    const trailing = globIncludePattern(`${rootPath}/**`)
+    expect(baseNames(trailing)).not.toContain('.hidden.conf')
+    expect(trailing.matches.some((path) => path.includes('/.sub'))).toBe(false)
+  })
+
   it('agrees with globSync across assorted segment shapes', () => {
     const root = makeTempTree()
     const dir = join(root, 'd')
@@ -229,7 +274,8 @@ describe('globIncludePattern', () => {
       'daz.txt',
       'dbz.txt',
       `long${'a'.repeat(40)}z.txt`,
-      'literal{a}.txt'
+      'literal{a}.txt',
+      '.dot.txt'
     ]
     for (const name of names) {
       writeFileSync(join(dir, name), 'x')
@@ -250,7 +296,12 @@ describe('globIncludePattern', () => {
       '[z-a]*',
       '[c*]*',
       '*[0-9].txt',
-      'xa?by.txt'
+      'xa?by.txt',
+      '.*',
+      '[.]*',
+      '[!.]*',
+      '.dot*',
+      '?dot*'
     ]
     for (const pattern of patterns) {
       const expected = globSync(`${root.replace(/\\/g, '/')}/d/${pattern}`)
