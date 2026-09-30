@@ -92,6 +92,24 @@ function createSnapshot(overrides: Partial<AppState> = {}): AppState {
   } as AppState
 }
 
+function createEditFile(
+  id: string,
+  filePath: string,
+  runtimeEnvironmentId?: string | null
+): AppState['openFiles'][number] {
+  return {
+    id,
+    filePath,
+    relativePath: filePath.slice(1),
+    worktreeId: 'wt-1',
+    language: 'typescript',
+    runtimeEnvironmentId,
+    mode: 'edit',
+    isDirty: false,
+    isPreview: false
+  }
+}
+
 function createRepo(id: string, connectionId: string | null): AppState['repos'][number] {
   return {
     id,
@@ -506,5 +524,34 @@ describe('buildWorkspaceSessionPayload', () => {
 
     expect(payload.activeFileIdByWorktree).toEqual({})
     expect(payload.activeTabTypeByWorktree).toEqual({ 'wt-2': 'terminal' })
+  })
+
+  // Why (issue #23967): the session mirror keys local files by raw path while hydration recasts
+  // every persisted row to an owned id, so each launch can re-append a row hydration already
+  // folds as corruption (#17370 keeps the first record per owner). Persisting one row per
+  // (path, worktree, runtime) tuple is lossless for restore and stops the file from growing.
+  it('folds repeated open-file rows for the same (path, worktree, runtime) tuple', () => {
+    const ownedId = 'editor:wt-1:env-a:%2Ftmp%2Fdemo.ts'
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        openFiles: [
+          createEditFile(ownedId, '/tmp/demo.ts', 'env-a'),
+          createEditFile('/tmp/demo.ts', '/tmp/demo.ts', 'env-a'),
+          createEditFile('editor:wt-1:env-b:%2Ftmp%2Fdemo.ts', '/tmp/demo.ts', 'env-b'),
+          createEditFile('/tmp/other.ts', '/tmp/other.ts', 'env-a'),
+          createEditFile('editor:wt-1:env-a:%2Ftmp%2Fother.ts', '/tmp/other.ts', 'env-a')
+        ],
+        activeFileIdByWorktree: { 'wt-1': ownedId }
+      })
+    )
+
+    expect(
+      payload.openFilesByWorktree?.['wt-1'].map((row) => [row.filePath, row.runtimeEnvironmentId])
+    ).toEqual([
+      ['/tmp/demo.ts', 'env-a'],
+      ['/tmp/demo.ts', 'env-b'],
+      ['/tmp/other.ts', 'env-a']
+    ])
+    expect(payload.activeFileIdByWorktree).toEqual({ 'wt-1': ownedId })
   })
 })
