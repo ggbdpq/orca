@@ -42,7 +42,7 @@ export class StructuredAgentSessionBackgroundTaskChannel {
       request,
       scope
     })
-    const backgroundTasks = this.state(request.sessionId)
+    const backgroundTasks = this.state(request.sessionId) ?? null
     const queue = tryReadQueuePublication(journal)
     const hostNow = this.deps.now?.() ?? Date.now()
     return {
@@ -63,7 +63,12 @@ export class StructuredAgentSessionBackgroundTaskChannel {
   /** Resolves once the conversation is open and the subscriber holds its opening frame. */
   async subscribe(input: AgentSessionSubscribeInput): Promise<() => void> {
     const session = await this.conversation(input.sessionId)
-    const backgroundTasks = this.state(input.sessionId)
+    // `undefined` means the adapter cannot see a live provider child (idle-swept,
+    // exited, never started) — a conversation read at rest has no live background
+    // tasks. Report that empty state instead of omitting the field: a resuming
+    // renderer reads a missing field as "no change" and would keep showing tasks
+    // that ended while its pane was hidden. `publish` keeps its own semantics.
+    const backgroundTasks = this.state(input.sessionId) ?? null
     return this.subscribers.open({
       ...input,
       journal: session.journal,
