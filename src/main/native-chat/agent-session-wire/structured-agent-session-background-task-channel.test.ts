@@ -7,10 +7,18 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionSubscribeEvent } from '../../../shared/agent-session-wire'
+import type {
+  AgentSessionBackgroundTaskState,
+  AgentSessionSubscribeEvent
+} from '../../../shared/agent-session-wire'
+import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
-import { createTrackedJournalOpener } from '../agent-session-journal/journal-host-database-test-support'
+import {
+  createTrackedJournalOpener,
+  openTestJournalHostDatabase
+} from '../agent-session-journal/journal-host-database-test-support'
 import { AgentSessionSubscribers } from './structured-agent-session-subscribers'
+import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import { StructuredAgentSessionBackgroundTaskChannel } from './structured-agent-session-background-task-channel'
 import type { StructuredAgentSessionHostSession } from './structured-agent-session-host-types'
 
@@ -30,7 +38,9 @@ afterEach(async () => {
 
 function buildChannel(input: {
   journal: AgentSessionJournal
-  backgroundTaskState: () => unknown
+  /** The state directory whose journal database fills the deps' shape; the channel never reads it. */
+  stateDirectory: string
+  backgroundTaskState: () => AgentSessionBackgroundTaskState | null | undefined
   subscribers: AgentSessionSubscribers
   onPublished: (sessionId: string) => void
 }): StructuredAgentSessionBackgroundTaskChannel {
@@ -41,8 +51,13 @@ function buildChannel(input: {
   } as unknown as StructuredAgentSessionHostSession
   return new StructuredAgentSessionBackgroundTaskChannel(
     {
-      adapter: { backgroundTaskState: input.backgroundTaskState },
-      store: { getRecord: () => undefined }
+      // The channel reads only the adapter's background-task read and the record fence.
+      adapter: {
+        backgroundTaskState: input.backgroundTaskState
+      } as unknown as StructuredAgentSessionAdapter,
+      store: { getRecord: () => null } as unknown as AgentSessionRecordStore,
+      journalDatabase: openTestJournalHostDatabase(input.stateDirectory),
+      claimKeyId: 'background-task-channel-test'
     },
     new Map([[SESSION, session]]),
     input.subscribers,
@@ -66,6 +81,7 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
     const subscribers = new AgentSessionSubscribers()
     const channel = buildChannel({
       journal,
+      stateDirectory: join(root, 'swept-child-journal'),
       // The idle sweep stopped the provider child: the adapter cannot see it.
       backgroundTaskState: () => undefined,
       subscribers,
@@ -80,10 +96,13 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
       cursor: journal.cursor()
     })
     // Read before close(): the unsubscribe emits a terminal `end` frame.
-    const batch = events.at(-1)
+    const batch = events.find(
+      (event): event is Extract<AgentSessionSubscribeEvent, { type: 'batch' }> =>
+        event.type === 'batch'
+    )
     close()
 
-    expect(batch?.type).toBe('batch')
+    expect(batch).toBeDefined()
     expect(batch?.backgroundTasks).toBe(null)
   })
 
@@ -99,13 +118,14 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
       stateDirectory: join(root, 'live-child-journal')
     })
     const subscribers = new AgentSessionSubscribers()
-    const liveState = {
+    const liveState: AgentSessionBackgroundTaskState = {
       state: 'monitoring',
       tasks: [{ id: 'task-1', kind: 'command', description: 'watch CI' }]
     }
     const backgroundTaskState = vi.fn(() => liveState)
     const channel = buildChannel({
       journal,
+      stateDirectory: join(root, 'live-child-journal'),
       backgroundTaskState,
       subscribers,
       onPublished: () => {}
@@ -118,7 +138,10 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
       emit: (event) => events.push(event),
       cursor: journal.cursor()
     })
-    const batch = events.at(-1)
+    const batch = events.find(
+      (event): event is Extract<AgentSessionSubscribeEvent, { type: 'batch' }> =>
+        event.type === 'batch'
+    )
     close()
 
     expect(backgroundTaskState).toHaveBeenCalledWith(SESSION)
@@ -139,6 +162,7 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
     const subscribers = new AgentSessionSubscribers()
     const channel = buildChannel({
       journal,
+      stateDirectory: join(root, 'settled-child-journal'),
       backgroundTaskState: () => null,
       subscribers,
       onPublished: () => {}
@@ -151,7 +175,10 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
       emit: (event) => events.push(event),
       cursor: journal.cursor()
     })
-    const batch = events.at(-1)
+    const batch = events.find(
+      (event): event is Extract<AgentSessionSubscribeEvent, { type: 'batch' }> =>
+        event.type === 'batch'
+    )
     close()
 
     expect(batch?.backgroundTasks).toBe(null)
@@ -171,6 +198,7 @@ describe('StructuredAgentSessionBackgroundTaskChannel', () => {
     const subscribers = new AgentSessionSubscribers()
     const channel = buildChannel({
       journal,
+      stateDirectory: join(root, 'history-journal'),
       backgroundTaskState: () => undefined,
       subscribers,
       onPublished: () => {}

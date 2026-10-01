@@ -411,6 +411,51 @@ describe('structured agent session reducer', () => {
     expect(withoutCapability.backgroundTasks).toBeUndefined()
   })
 
+  it('reads an omitted batch field as no change and an explicit null as the empty roster', () => {
+    const monitoring = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
+      type: 'event',
+      event: {
+        type: 'snapshot',
+        sessionId: 'session-a',
+        fence: 1,
+        page: hydrationPage([item('message', 1)]),
+        backgroundTasks: {
+          state: 'monitoring',
+          tasks: [{ id: 'task-1', kind: 'command', description: 'watch CI' }]
+        }
+      }
+    })
+    // A host that cannot see a live child omits the field; the roster it is already
+    // showing must survive that frame untouched.
+    const omitted = reduceStructuredAgentSession(monitoring, {
+      type: 'event',
+      event: {
+        type: 'batch',
+        sessionId: 'session-a',
+        batch: { cursor: monitoring.cursor!, items: [], removedItemIds: [], submissions: [] },
+        fence: 1
+      }
+    })
+
+    expect(omitted).toBe(monitoring)
+
+    // A pane resuming at rest reads the channel's explicit empty state (#24227):
+    // null must replace the stale roster so the finished task leaves the strip.
+    const resumed = reduceStructuredAgentSession(omitted, {
+      type: 'event',
+      event: {
+        type: 'batch',
+        sessionId: 'session-a',
+        batch: { cursor: monitoring.cursor!, items: [], removedItemIds: [], submissions: [] },
+        fence: 1,
+        backgroundTasks: null
+      }
+    })
+
+    expect(resumed.backgroundTasks).toBe(null)
+    expect(resumed.items).toBe(monitoring.items)
+  })
+
   it('projects ephemeral activity without changing transcript identity and clears it', () => {
     const initial = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
       type: 'event',
