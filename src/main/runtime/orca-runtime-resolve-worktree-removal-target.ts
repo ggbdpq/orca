@@ -7,7 +7,7 @@ import type {
 } from './runtime-worktree-selection'
 import { resolveRuntimeWorktreeRemovalTarget } from './runtime-worktree-removal-target'
 import type { RuntimeStore } from './runtime-store-contract'
-import { splitWorktreeId } from '../../shared/worktree/id'
+import { splitWorktreeId, splitWorktreeIdForFilesystem } from '../../shared/worktree/id'
 import { runtimeWorktreeIdsEqual } from './runtime-worktree-path-identity'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../worktree-removal-repo-owner'
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
@@ -30,6 +30,7 @@ import { resolveAgentStartupPlanInputs } from '../../shared/agent-startup-plan-i
 import { agentStartedTelemetry } from '../agent-launch/agent-started-telemetry'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../shared/execution-host'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
+import { removeOrcaCreatedProjectTrustEntries } from '../codex/config-toml-trust'
 import {
   resumeInterruptedWorktreeRemovals,
   retryFailedWorktreeRemoval,
@@ -137,6 +138,13 @@ export class OrcaRuntimeWithResolveWorktreeRemovalTarget extends OrcaRuntimeWith
   ): void {
     // Why: worktree IDs are path-derived and can be recreated, so removal must
     // purge history and process-local caches before the ID points at new state.
+    // The Codex pretrust entry Orca wrote for the path is the same hazard: drop
+    // it so a recreated worktree is not born pre-trusted (#24697). The grant
+    // keyed the bare path, so a folder session's ::workspace:<uuid> suffix must not hide it.
+    const worktreePath = splitWorktreeIdForFilesystem(worktreeId)?.worktreePath
+    if (worktreePath) {
+      void removeOrcaCreatedProjectTrustEntries(worktreePath)
+    }
     const persistedHostId = store.getWorktreeMeta(worktreeId)?.hostId
     const repoId = splitWorktreeId(worktreeId)?.repoId
     const preservesSameIdOwner = Boolean(
