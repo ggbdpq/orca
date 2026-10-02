@@ -69,26 +69,30 @@ export async function deliverWorktreeStartupFollowup(
 ): Promise<boolean> {
   try {
     const ptyId = await waitForWorktreeStartupDraft(host, handle, followup.agent)
+    if (ptyId) {
+      // Why the paste frame: a raw write reaches the composer as keystrokes, so a
+      // Kimi-style TUI reads the submit's CR through the pre-raw-mode line
+      // discipline as LF (insert-newline) and multi-line prompts keystroke in their
+      // embedded LFs. Every other TUI dispatch frames the prompt this way.
+      host.write(ptyId, buildAgentPromptPasteBytes(followup.prompt), 'launch')
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          resolveAgentPromptSubmitDelayForAgent(process.platform, followup.prompt, followup.agent)
+        )
+      )
+      host.write(ptyId, AGENT_PROMPT_SUBMIT, 'launch')
+      return true
+    }
     // Why the fallback: a TUI whose ready signal never fires still gets the
     // process-name gate instead of silently dropping the prompt.
-    const target =
-      ptyId ?? (await waitForWorktreeStartupFollowup(host, handle, followup.expectedProcess))
+    const target = await waitForWorktreeStartupFollowup(host, handle, followup.expectedProcess)
     if (!target) {
       console.warn('[worktree-create] agent did not become ready for follow-up prompt')
       return false
     }
-    // Why the paste frame: a raw write reaches the composer as keystrokes, so a
-    // Kimi-style TUI reads the submit's CR through the pre-raw-mode line
-    // discipline as LF (insert-newline) and multi-line prompts keystroke in their
-    // embedded LFs. Every other TUI dispatch frames the prompt this way.
-    host.write(target, buildAgentPromptPasteBytes(followup.prompt), 'launch')
-    await new Promise((resolve) =>
-      setTimeout(
-        resolve,
-        resolveAgentPromptSubmitDelayForAgent(process.platform, followup.prompt, followup.agent)
-      )
-    )
-    host.write(target, AGENT_PROMPT_SUBMIT, 'launch')
+    // Why bare: without the scanner's confirmation bracketed paste may be off, so delimiters would type in as literal input.
+    host.write(target, `${followup.prompt}${AGENT_PROMPT_SUBMIT}`, 'launch')
     return true
   } catch (error) {
     console.warn('[worktree-create] failed to send startup follow-up prompt:', error)

@@ -39,9 +39,10 @@ describe('startup follow-up delivery', () => {
     await vi.runAllTimersAsync()
 
     await expect(delivered).resolves.toBe(true)
-    const writes = write.mock.calls.map((call) => call[1] as string)
-    // The prompt goes as one bracketed-paste frame, then the submit CR on its own.
-    expect(writes.join('')).toBe('\x1b[200~fix the flaky test\x1b[201~\r')
+    // Without the scanner's confirmation bracketed paste may be off, so the
+    // fallback keeps the bare single write (prompt + submit CR).
+    expect(write).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledWith('pty-1', 'fix the flaky test\r', 'launch')
   })
 
   it('writes nothing and reports false when the agent never comes to the front', async () => {
@@ -443,7 +444,7 @@ describe('stdin-after-start follow-up dispatch', () => {
     return { host, write, emit: (data: string) => listener(data) }
   }
 
-  it('frames the follow-up prompt as one bracketed paste and submits it with a lone CR', async () => {
+  it('frames the follow-up prompt as one bracketed paste and a lone CR once the scanner confirms the composer', async () => {
     vi.useFakeTimers()
     const h = followupFixture('\x1b[?2004h')
     sendWorktreeStartupFollowupWhenReady(h.host, 'term-1', {
@@ -458,5 +459,19 @@ describe('stdin-after-start follow-up dispatch', () => {
     expect(writes.filter((data) => data === '\r')).toHaveLength(1)
     expect(writes.some((data) => data.endsWith('\n'))).toBe(false)
     expect(writes.join('')).toBe('\x1b[200~line one\nline two\x1b[201~\r')
+  })
+
+  it('falls back to one bare prompt+CR write when the ready signal never fires', async () => {
+    vi.useFakeTimers()
+    const h = followupFixture()
+    sendWorktreeStartupFollowupWhenReady(h.host, 'term-1', {
+      agent: 'kimi',
+      expectedProcess: 'kimi-code',
+      prompt: 'line one\nline two'
+    })
+    await vi.runAllTimersAsync()
+    // Without the scanner's confirmation bracketed paste may be off, so the
+    // delimiters would type in as literal input — keep the raw single write.
+    expect(h.write.mock.calls.map((call) => call[1] as string)).toEqual(['line one\nline two\r'])
   })
 })
