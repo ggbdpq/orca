@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OPENCODE_AGENT_ROW_GRACE_MS } from '../../shared/opencode-agent-row-scanner'
 import {
   deliverWorktreeStartupFollowup,
+  sendWorktreeStartupFollowupWhenReady,
   waitForWorktreeStartupDraft,
   type WorktreeStartupReadinessHost
 } from './runtime-worktree-startup-readiness'
@@ -25,16 +26,22 @@ describe('startup follow-up delivery', () => {
   }
 
   it('types the prompt once the agent is in front and reports it written', async () => {
+    vi.useFakeTimers()
     const { host, write } = followupHost('aider')
 
-    await expect(
-      deliverWorktreeStartupFollowup(host, 'term-1', {
-        expectedProcess: 'aider',
-        prompt: 'fix the flaky test'
-      })
-    ).resolves.toBe(true)
-    expect(write).toHaveBeenCalledOnce()
-    expect(write).toHaveBeenCalledWith('pty-1', 'fix the flaky test\r', 'launch')
+    const delivered = deliverWorktreeStartupFollowup(host, 'term-1', {
+      agent: 'aider',
+      expectedProcess: 'aider',
+      prompt: 'fix the flaky test'
+    })
+    // The composer-ready signal never fires, so the wait falls through to the
+    // process-name gate before the prompt is typed.
+    await vi.runAllTimersAsync()
+
+    await expect(delivered).resolves.toBe(true)
+    const writes = write.mock.calls.map((call) => call[1] as string)
+    // The prompt goes as one bracketed-paste frame, then the submit CR on its own.
+    expect(writes.join('')).toBe('\x1b[200~fix the flaky test\x1b[201~\r')
   })
 
   it('writes nothing and reports false when the agent never comes to the front', async () => {
@@ -43,10 +50,11 @@ describe('startup follow-up delivery', () => {
     const { host, write } = followupHost('zsh')
 
     const delivered = deliverWorktreeStartupFollowup(host, 'term-1', {
+      agent: 'aider',
       expectedProcess: 'aider',
       prompt: 'fix the flaky test'
     })
-    await vi.advanceTimersByTimeAsync(30 * 150)
+    await vi.runAllTimersAsync()
 
     await expect(delivered).resolves.toBe(false)
     expect(write).not.toHaveBeenCalled()
@@ -414,5 +422,41 @@ describe('OpenCode submit readiness', () => {
       await vi.advanceTimersByTimeAsync(1)
       expect(result.value).toBe('pty-1')
     })
+  })
+})
+describe('stdin-after-start follow-up dispatch', () => {
+  afterEach(() => vi.useRealTimers())
+
+  function followupFixture(replay?: string) {
+    let listener = (_data: string): void => {}
+    const write = vi.fn()
+    const host: WorktreeStartupReadinessHost = {
+      getPtyId: () => 'pty-1',
+      getForegroundProcess: async () => 'kimi-code',
+      subscribeToData: (_ptyId, onData) => {
+        listener = onData
+        return () => {}
+      },
+      readRecentOutput: () => replay,
+      write
+    }
+    return { host, write, emit: (data: string) => listener(data) }
+  }
+
+  it('frames the follow-up prompt as one bracketed paste and submits it with a lone CR', async () => {
+    vi.useFakeTimers()
+    const h = followupFixture('\x1b[?2004h')
+    sendWorktreeStartupFollowupWhenReady(h.host, 'term-1', {
+      agent: 'kimi',
+      expectedProcess: 'kimi-code',
+      prompt: 'line one\nline two'
+    })
+    await vi.runAllTimersAsync()
+    const writes = h.write.mock.calls.map((call) => call[1] as string)
+    // The submit keystroke is its own CR write — never an LF (Kimi binds LF to
+    // insert-newline), and never folded into the paste frame.
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+    expect(writes.some((data) => data.endsWith('\n'))).toBe(false)
+    expect(writes.join('')).toBe('\x1b[200~line one\nline two\x1b[201~\r')
   })
 })
