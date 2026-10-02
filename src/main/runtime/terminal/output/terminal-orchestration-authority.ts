@@ -27,6 +27,12 @@ import { resolveStructuredWorkerAuthority } from '../../structured-worker-author
 import { isStructuredWorkerHandle } from '../../../../shared/structured-worker-handle'
 import { parseOrcaSessionAddress } from '../../../../shared/orca-session-address'
 import { matchesProcessIncarnation } from '../../orchestration/worker-terminal-process-liveness'
+import { mapExplicitAgentStateToRuntimeTerminalStatus } from '../../runtime-worktree-status-projection'
+import { selectFreshExplicitAgentStatusRow } from '../../runtime-hook-agent-row-selection'
+
+/** Resident TUIs (pi-family-events.ts) whose turn boundary is their own `before_agent_start`,
+ *  not the shell command the 133;D frame would close. */
+const RESIDENT_AGENT_TURN_SOURCES: ReadonlySet<string> = new Set(['pi', 'omp', 'prime-agent'])
 
 export abstract class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   protected abstract getExistingTerminalHandlesForPtyId(ptyId: string): string[]
@@ -132,6 +138,29 @@ export abstract class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends O
         : null,
       hostScope
     }
+  }
+
+  /** Why: a resident Pi-family TUI repaints its transcript with fresh OSC 133;D marks mid-turn
+   *  (#24436); while its hook row still shows a live turn, that mark cannot be the launched
+   *  command ending, so launch authority must survive it. Other sources and ended/absent rows
+   *  keep today's unconditional retirement (STA-4557). */
+  protected retirePtyAgentLaunchAuthorityOnCommandFinished(ptyId: string): void {
+    const hookRows = this.getAgentStatusSnapshotFn?.() ?? []
+    if (hookRows.length > 0) {
+      const row = selectFreshExplicitAgentStatusRow({
+        handles: this.getExistingTerminalHandlesForPtyId(ptyId),
+        paneKeys: this.collectAgentStatusPaneKeysForPty(ptyId),
+        hookRows
+      })
+      if (
+        row &&
+        RESIDENT_AGENT_TURN_SOURCES.has(row.agentType) &&
+        mapExplicitAgentStateToRuntimeTerminalStatus(row.state) !== 'idle'
+      ) {
+        return
+      }
+    }
+    this.retirePtyAgentLaunchAuthority(ptyId)
   }
 
   protected retirePtyAgentLaunchAuthority(ptyId: string): void {
