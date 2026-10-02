@@ -24,7 +24,10 @@ export function useMarkdownPreviewScrollViewport({
         clearTimeout(throttleTimer)
       }
       throttleTimer = setTimeout(() => {
-        setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
+        // Why: a scroll burst while hidden (layout re-drop) must not overwrite the blur-time snapshot.
+        if (!document.hidden) {
+          setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
+        }
         throttleTimer = null
       }, 150)
     }
