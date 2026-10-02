@@ -142,6 +142,42 @@ describe.each(HARNESS_CASES)('$name reveal restore', ({ Harness }) => {
     expect(scrollTopCache.get(scrollCacheKey)).toBe(700)
   })
 
+  it('keeps the blur-time snapshot when a hidden-period scroll re-arms the debounce before reveal', async () => {
+    const container = await mountHarness()
+
+    act(() => {
+      container.scrollTop = 1200
+      container.dispatchEvent(new Event('scroll'))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+    act(() => {
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(scrollTopCache.get(scrollCacheKey)).toBe(1200)
+
+    // hidden: the OS drops the position and a layout-induced scroll re-arms the debounce
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+    try {
+      act(() => {
+        container.scrollTop = 0
+        container.dispatchEvent(new Event('scroll'))
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(200)
+      })
+      expect(scrollTopCache.get(scrollCacheKey)).toBe(1200)
+
+      act(() => {
+        window.dispatchEvent(new Event('focus'))
+      })
+      expect(container.scrollTop).toBe(1200)
+    } finally {
+      Reflect.deleteProperty(document, 'hidden')
+    }
+  })
+
   it('stays idle without a cache and never overrides live or deliberately-top positions', async () => {
     const container = await mountHarness()
 
