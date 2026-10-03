@@ -235,8 +235,9 @@ export class RuntimeProjectGroupController {
         await this.deps.teardownFolderWorkspacePtys(worktreeId, connectionId)
       }
       // Fired here (timing unchanged) but awaited at the end: the delete may
-      // only resolve after the purge — and the Codex pretrust deletion inside
-      // it — has landed, or a recreated workspace inherits the stale trust.
+      // only resolve after the purge has landed. `folder:<uuid>` ids parse to
+      // no filesystem path, so the pretrust drop inside the purge skips here —
+      // safe: the folder itself stays and sibling workspaces may share its path.
       cleanupState = this.deps.cleanupRemovedFolderWorkspaceState(worktreeId)
     }
     const deleted = store.removeFolderWorkspace(folderWorkspaceId)
