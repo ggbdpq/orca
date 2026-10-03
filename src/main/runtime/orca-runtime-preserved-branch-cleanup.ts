@@ -287,9 +287,11 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
       ),
     cleanupRemovedFolderWorkspaceState: (worktreeId) => {
       if (this.store) {
-        // Folder-workspace forgetting keeps its fire-and-forget timing (the
-        // controller's dep is sync); the cleanup degrades its own failures.
-        void this.removeWorktreeMetadataAndHistory(this.store, worktreeId)
+        // Returned, not voided: the controller awaits it at the end of the
+        // delete, so a forgotten folder workspace cannot report before the
+        // Codex pretrust deletion inside the purge has landed. Failures
+        // degrade inside the cleanup.
+        return this.removeWorktreeMetadataAndHistory(this.store, worktreeId)
       }
       // Why every host after the local-only hub: this store mints folder ids, so none is shared.
       this.dropAgentStatusForRemovedWorktreeFn?.(worktreeId, ALL_EXECUTION_HOSTS_SCOPE)
