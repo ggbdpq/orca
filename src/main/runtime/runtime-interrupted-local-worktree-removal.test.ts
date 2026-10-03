@@ -146,7 +146,9 @@ async function finishAfterRestart(options: { repoGone?: boolean; head?: string }
         preserveHead: (result) => result ?? {},
         remember
       },
-      purge: ({ worktreeId }) => purged.push(worktreeId),
+      purge: ({ worktreeId }) => {
+        purged.push(worktreeId)
+      },
       onRemoved: () => {},
       publish: () => {}
     })

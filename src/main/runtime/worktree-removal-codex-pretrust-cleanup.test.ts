@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OrcaRuntimeService } from './orca-runtime'
 import { upsertOrcaCreatedProjectTrustLevel } from '../codex/config-toml-trust'
+import { runExclusivelyForCodexTrustConfig } from '../codex/codex-trust-config-mutation-queue'
 
 const WORKTREE_ID = 'repo-1::/tmp/worktrees/feature-r1'
 const PROJECT = '/tmp/worktrees/feature-r1'
@@ -31,7 +32,7 @@ function makeRuntimePurge(meta: Record<string, unknown> = {}) {
           store: unknown,
           worktreeId: string,
           hostId?: string
-        ) => void
+        ) => void | Promise<void>
       }
     ).removeWorktreeMetadataAndHistory(store, worktreeId, hostId)
 }
@@ -102,5 +103,37 @@ describe('worktree removal cleans up the Codex pretrust Orca wrote', () => {
     await vi.waitFor(() => {
       expect(readFileSync(configPath, 'utf-8')).not.toContain(`[projects."${PROJECT}"]`)
     })
+  })
+
+  it('does not complete the purge before the recorded entry is deleted', async () => {
+    upsertOrcaCreatedProjectTrustLevel(configPath, PROJECT, 'trusted')
+    // Why: holding the config's mutation lane parks the cleanup, so "the purge
+    // finished" and "the entry is gone" can be told apart. A recreated path
+    // inherits trust_level = "trusted" if the purge reports completion first.
+    let releaseLane!: () => void
+    const laneHeld = new Promise<void>((resolve) => {
+      releaseLane = resolve
+    })
+    const hold = runExclusivelyForCodexTrustConfig(configPath, () => laneHeld)
+    const purge = makeRuntimePurge()
+
+    const removalAck = purge(WORKTREE_ID)
+
+    // The cleanup is queued behind the held lane: nothing landed yet.
+    expect(readFileSync(configPath, 'utf-8')).toContain(`[projects."${PROJECT}"]`)
+    // A settled purge here is the bug: the removal ack must wait for the
+    // deletion that is still parked on the config lane. A 0ms macrotask loses
+    // to any settled ack (microtasks first) and wins only against a pending one.
+    const settledBeforeCleanup = await Promise.race([
+      Promise.resolve(removalAck).then(() => true),
+      new Promise<false>((resolve) => {
+        setTimeout(() => resolve(false), 0)
+      })
+    ])
+    expect(settledBeforeCleanup).toBe(false)
+    releaseLane()
+    await hold
+    await removalAck
+    expect(readFileSync(configPath, 'utf-8')).not.toContain(`[projects."${PROJECT}"]`)
   })
 })
