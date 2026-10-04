@@ -5,6 +5,7 @@ import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire
 import { replaceConversationInSnapshot } from './structured-conversation-tab-replacement'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { isTuiAgent } from '../../shared/tui-agent-config'
+import { resolveLaunchCommandPaneAgent } from './runtime-agent-launch-resolution'
 import type { RuntimeStore } from './runtime-store-contract'
 import type { RuntimeClientSettingsController } from './runtime-client-settings'
 import type { RuntimeAutomationController } from './runtime-automation-controller'
@@ -278,7 +279,11 @@ export class OrcaRuntimeWithRuntimeId {
       return null
     }
     const pty = this.ptysById.get(ptyId)
-    const agent = pty?.launchAgent ?? pty?.foregroundAgent ?? null
+    const agent =
+      pty?.launchAgent ??
+      pty?.foregroundAgent ??
+      resolveLaunchCommandPaneAgent(pty?.launchCommandLine) ??
+      null
     return isTuiAgent(agent) ? agent : null
   }
 
