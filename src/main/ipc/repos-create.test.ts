@@ -288,6 +288,42 @@ describe('repos:create', () => {
     expect(mkdirMock).toHaveBeenNthCalledWith(2, tmpPath('brand-new'), { recursive: false })
   })
 
+  // A trailing space is a legal POSIX directory name (Google Drive exports them), so a
+  // picked parent that exists exactly as typed must win over the typed-typo trim.
+  it('creates inside a picked parent whose name ends in a space', async () => {
+    const spacedParent = '/tmp/gdrive repo '
+    accessMock.mockImplementation(async (probed: string) => {
+      if (probed === spacedParent) {
+        return undefined
+      }
+      throw new Error('ENOENT')
+    })
+
+    const result = await callCreate({ parentPath: spacedParent, name: 'proj', kind: 'folder' })
+
+    expect(mkdirMock).toHaveBeenNthCalledWith(1, spacedParent, { recursive: true })
+    expect(mkdirMock).toHaveBeenNthCalledWith(2, join(spacedParent, 'proj'), { recursive: false })
+    expect(mockStore.addRepo).toHaveBeenCalledWith(
+      expect.objectContaining({ path: join(spacedParent, 'proj') })
+    )
+    expect(result).toHaveProperty('repo.path', join(spacedParent, 'proj'))
+  })
+
+  // The flip side: a typed typo whose trimmed spelling exists keeps the old cleanup.
+  it('falls back to the trimmed spelling when the raw parent does not exist', async () => {
+    accessMock.mockImplementation(async (probed: string) => {
+      if (probed === '/tmp/typo') {
+        return undefined
+      }
+      throw new Error('ENOENT')
+    })
+
+    const result = await callCreate({ parentPath: '/tmp/typo ', name: 'proj', kind: 'folder' })
+
+    expect(mkdirMock).toHaveBeenNthCalledWith(1, '/tmp/typo', { recursive: true })
+    expect(result).toHaveProperty('repo.path', join('/tmp/typo', 'proj'))
+  })
+
   it('creates a missing default parent before creating the project directory', async () => {
     const result = await callCreate({
       parentPath: defaultProjectParent,

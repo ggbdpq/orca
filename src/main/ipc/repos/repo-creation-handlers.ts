@@ -59,6 +59,21 @@ function getDefaultCreateProjectParent(store: Store): string {
   return join(home, 'orca', 'projects')
 }
 
+// Why: a trailing space is a legal POSIX directory name (Google Drive exports them), so a
+// picker-returned parent that exists exactly as typed wins; the trim stays only for typed typos.
+async function resolveCreateParentPath(requestedPath: string): Promise<string> {
+  const trimmed = requestedPath.trim()
+  if (!trimmed || trimmed === requestedPath) {
+    return trimmed
+  }
+  try {
+    await access(requestedPath)
+    return requestedPath
+  } catch {
+    return trimmed
+  }
+}
+
 export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: Store): void {
   ipcMain.handle('repos:isGitAvailable', () => probeLocalGitAvailability())
   ipcMain.handle('repos:getDefaultCreateProjectParent', () => getDefaultCreateProjectParent(store))
@@ -132,7 +147,7 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
       args: { parentPath: string; name: string; kind: 'git' | 'folder' }
     ): Promise<{ repo: Repo } | { error: string }> => {
       const name = args.name?.trim() ?? ''
-      const parentPath = args.parentPath?.trim() ?? ''
+      const parentPath = await resolveCreateParentPath(args.parentPath ?? '')
       // Why: IPC input is untrusted — coerce to the narrow union so a bogus kind can't skip git init yet persist in the store.
       const repoKind: 'git' | 'folder' = args.kind === 'folder' ? 'folder' : 'git'
 
