@@ -324,6 +324,21 @@ describe('repos:create', () => {
     expect(result).toHaveProperty('repo.path', join('/tmp/typo', 'proj'))
   })
 
+  // A probe failure that is not "absent" (EACCES, ELOOP...) must surface as an error,
+  // not silently fall back to the trimmed spelling and create in an unchosen directory.
+  it('returns an error when probing the raw parent fails with EACCES', async () => {
+    const lockedParent = '/tmp/locked repo '
+    accessMock.mockRejectedValue(
+      Object.assign(new Error('EACCES: permission denied, access'), { code: 'EACCES' })
+    )
+
+    const result = await callCreate({ parentPath: lockedParent, name: 'proj', kind: 'folder' })
+
+    expect(result).toMatchObject({ error: expect.stringContaining('EACCES') })
+    expect(mkdirMock).not.toHaveBeenCalled()
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
+  })
+
   it('creates a missing default parent before creating the project directory', async () => {
     const result = await callCreate({
       parentPath: defaultProjectParent,
