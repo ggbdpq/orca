@@ -17,4 +17,13 @@ describe('terminalLinkClickBehaviorFor', () => {
     ).toBe('open')
     expect(terminalLinkClickBehaviorFor({ terminalLinkClickBehavior: 'none' })).toBe('none')
   })
+
+  it('returns the explicit actions behavior even when the legacy flag is false', () => {
+    expect(
+      terminalLinkClickBehaviorFor({
+        terminalLinkActionPopoverEnabled: false,
+        terminalLinkClickBehavior: 'actions'
+      })
+    ).toBe('actions')
+  })
 })
