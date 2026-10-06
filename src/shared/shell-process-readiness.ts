@@ -177,28 +177,33 @@ export async function readRelayedShellReadiness(options: {
     : null
   let installedPaths: string[] | null = null
   for (const childPid of await listImmediateChildPids(options.foregroundPid)) {
-    const ttyPath = await readForegroundChildTtyPath(childPid)
-    if (!ttyPath) {
+    // A listed child can exit before its probes run; skip it and keep scanning.
+    try {
+      const ttyPath = await readForegroundChildTtyPath(childPid)
+      if (!ttyPath) {
+        continue
+      }
+      const executablePath = await readExecutablePath(childPid)
+      if (!executablePath) {
+        continue
+      }
+      const canonicalPath = await realpath(executablePath)
+      if (basename(canonicalPath).toLowerCase() !== options.shellName) {
+        continue
+      }
+      if (expectedPath && canonicalPath === expectedPath) {
+        return { ttyPath }
+      }
+      installedPaths ??= await resolveInstalledShellExecutablePaths(
+        options.shellName,
+        options.shellCwd ?? process.cwd(),
+        options.shellPathEnv
+      )
+      if (installedPaths.includes(canonicalPath)) {
+        return { ttyPath }
+      }
+    } catch {
       continue
-    }
-    const executablePath = await readExecutablePath(childPid)
-    if (!executablePath) {
-      continue
-    }
-    const canonicalPath = await realpath(executablePath)
-    if (basename(canonicalPath).toLowerCase() !== options.shellName) {
-      continue
-    }
-    if (expectedPath && canonicalPath === expectedPath) {
-      return { ttyPath }
-    }
-    installedPaths ??= await resolveInstalledShellExecutablePaths(
-      options.shellName,
-      options.shellCwd ?? process.cwd(),
-      options.shellPathEnv
-    )
-    if (installedPaths.includes(canonicalPath)) {
-      return { ttyPath }
     }
   }
   return null
