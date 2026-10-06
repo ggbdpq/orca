@@ -149,4 +149,65 @@ describe('pr-refresh-coordinator', () => {
 
     expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(3)
   })
+
+  it('stops the visible follow-up loop once the linked PR is merged', async () => {
+    const { reportVisiblePRRefreshCandidates } = await import('./pr-refresh-coordinator')
+    getPRForBranchOutcomeMock.mockResolvedValue({
+      kind: 'found',
+      pr: makePR({ checksStatus: 'success', state: 'merged' }),
+      fetchedAt: Date.now()
+    })
+
+    reportVisiblePRRefreshCandidates([makeCandidate()], 1, 1)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(1)
+
+    // Why: a merged PR can never reopen and its state/checks/reviews are final,
+    // so there is nothing left for the background loop to learn.
+    await vi.advanceTimersByTimeAsync(31 * 60_000)
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the 30-minute confirmation loop for a closed PR so a reopen is noticed', async () => {
+    const { reportVisiblePRRefreshCandidates } = await import('./pr-refresh-coordinator')
+    getPRForBranchOutcomeMock.mockResolvedValue({
+      kind: 'found',
+      pr: makePR({ checksStatus: 'success', state: 'closed' }),
+      fetchedAt: Date.now()
+    })
+
+    reportVisiblePRRefreshCandidates([makeCandidate()], 1, 1)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(1)
+
+    // Why: a closed (unmerged) PR can be reopened, so the low-frequency
+    // confirmation poll stays and resumes normal pacing once it sees `open`.
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('skips background re-reports for a merged worktree but still refreshes on activation', async () => {
+    const { enqueuePRRefresh, reportVisiblePRRefreshCandidates } =
+      await import('./pr-refresh-coordinator')
+    getPRForBranchOutcomeMock.mockResolvedValue({
+      kind: 'found',
+      pr: makePR({ checksStatus: 'success', state: 'merged' }),
+      fetchedAt: Date.now()
+    })
+    const merged = makeCandidate({
+      cachedFetchedAt: Date.now(),
+      cachedHasPR: true,
+      cachedPRState: 'merged',
+      cachedChecksStatus: 'success',
+      cachedMergeable: 'MERGEABLE'
+    })
+
+    reportVisiblePRRefreshCandidates([merged], 1, 1)
+    await vi.advanceTimersByTimeAsync(31 * 60_000)
+    expect(getPRForBranchOutcomeMock).not.toHaveBeenCalled()
+
+    enqueuePRRefresh({ ...merged, cachedFetchedAt: Date.now() }, 'active', 80, 1)
+    await vi.runOnlyPendingTimersAsync()
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(1)
+  })
 })

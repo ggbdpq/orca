@@ -7,6 +7,7 @@ import { getPRForBranchOutcome } from './client'
 import {
   aliasFromCandidate,
   hostedReviewOptionArgs,
+  isBudgetedBackground,
   MANUAL_MERGEABILITY_PENDING_REFRESH_MS,
   refreshKey,
   shouldBroadcastQueued,
@@ -71,6 +72,16 @@ export function enqueuePRRefresh(
     queue.removeInvalidAlias(key, alias)
     events.record('skipped', reason, skippedReason)
     events.broadcast({ aliases: [alias], reason, status: 'skipped', skippedReason })
+    return
+  }
+
+  // Why: a merged PR can never reopen and its checks/reviews cannot change, so
+  // budgeted background reports (visible rows, focus sweeps) must not keep
+  // restarting its loop. Manual, activation and post-push refreshes bypass this
+  // and resume polling if the branch resolves to a different, open PR.
+  if (isBudgetedBackground(reason) && candidate.cachedPRState === 'merged') {
+    events.record('skipped', reason, 'fresh')
+    events.broadcast({ aliases: [alias], reason, status: 'skipped', skippedReason: 'fresh' })
     return
   }
 

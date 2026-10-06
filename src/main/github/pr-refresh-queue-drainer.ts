@@ -54,6 +54,15 @@ export class PRRefreshQueueDrainer {
       this.retry.reset(key)
       return
     }
+    if (outcome.kind === 'found' && outcome.pr.state === 'merged') {
+      // Why: a merged PR can never reopen and its state/checks/reviews are final,
+      // so the visible follow-up loop ends here. Manual, activation and post-push
+      // refreshes still run and resume polling if the branch ever resolves to a
+      // different PR. Closed PRs keep the interval loop below so a reopen is
+      // noticed on the low-frequency confirmation poll.
+      this.retry.reset(key)
+      return
+    }
     if (outcome.kind === 'upstream-error') {
       const retryAt = options?.plannedRetryAt ?? this.retry.nextVisibleErrorRetryAt(key)
       this.queue.setVisibleFollowUp({
