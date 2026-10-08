@@ -10,7 +10,10 @@ import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resum
 import type { TuiAgent } from '../../shared/tui-agent'
 import { probeOpenCodeLaunchModelContext } from './opencode-launch-model-context'
 import { resolveOpenCodeLaunchModelConfig } from './opencode-launch-model-config'
-import { isVerifiedOpenCodeLegacyModelVersion } from './opencode-model-version-policy'
+import {
+  isVerifiedOpenCodeLegacyModelVersion,
+  VERIFIED_OPENCODE_MODEL_VERSIONS
+} from './opencode-model-version-policy'
 import { getTuiAgentLaunchCommand, TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import { applyManagedDataAccountEnvironment } from '../managed-data-accounts/launch-environment'
 import { OrchestrationError } from '../runtime/orchestration/orchestration-error'
@@ -28,10 +31,10 @@ type StartupScope = {
   signal?: AbortSignal
 }
 
-function refuseModel(): never {
+function refuseModel(detail?: string): never {
   throw new OrchestrationError(
     'capability_unsupported',
-    'The execution host cannot verify this OpenCode model launch.'
+    detail ?? 'The execution host cannot verify this OpenCode model launch.'
   )
 }
 
@@ -92,7 +95,13 @@ export async function prepareOpenCodeModelStartupInputs(
     }
     return { inputs }
   }
-  if (capabilities?.version !== '2.0.16' || inputs.agentArgs?.trim()) {
+  if (capabilities?.version !== '2.0.16') {
+    refuseModel(
+      `OpenCode CLI version ${capabilities?.version ?? 'unknown'} cannot verify launch-time model selection. ` +
+        `Use a verified OpenCode CLI (${VERIFIED_OPENCODE_MODEL_VERSIONS}).`
+    )
+  }
+  if (inputs.agentArgs?.trim()) {
     refuseModel()
   }
   const before = await probeOpenCodeLaunchModelContext({

@@ -110,7 +110,7 @@ describe('execution-host OpenCode model startup', () => {
     }
   })
 
-  it.each(['1.18.30', '1.18.32'])(
+  it.each(['1.18.30', '1.18.32', '1.18.35'])(
     'preserves the verified legacy launch route %s',
     async (version) => {
       vi.mocked(probeOpenCodeLaunchCapabilities).mockResolvedValue({
@@ -178,7 +178,7 @@ describe('execution-host OpenCode model startup', () => {
     expect(resolveOpenCodeDirectModelExecutable).not.toHaveBeenCalled()
   })
 
-  it.each(['1.18.31', '1.18.33', '2.0.17'])(
+  it.each(['1.18.31', '1.18.33', '1.18.34', '2.0.17'])(
     'refuses unverified version %s before model probing',
     async (version) => {
       vi.mocked(probeOpenCodeLaunchCapabilities).mockResolvedValue({
@@ -189,6 +189,9 @@ describe('execution-host OpenCode model startup', () => {
       await expect(buildExecutionHostAgentStartupPlan(scope())).rejects.toMatchObject({
         code: 'capability_unsupported'
       })
+      await expect(buildExecutionHostAgentStartupPlan(scope())).rejects.toThrow(
+        new RegExp(`OpenCode CLI version ${version}.*verified OpenCode CLI`)
+      )
       expect(probeOpenCodeLaunchModelContext).not.toHaveBeenCalled()
       expect(probeOpenCodeModelAvailability).not.toHaveBeenCalled()
     }
