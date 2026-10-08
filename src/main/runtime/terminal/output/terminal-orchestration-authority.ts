@@ -29,10 +29,7 @@ import { parseOrcaSessionAddress } from '../../../../shared/orca-session-address
 import { matchesProcessIncarnation } from '../../orchestration/worker-terminal-process-liveness'
 import { mapExplicitAgentStateToRuntimeTerminalStatus } from '../../runtime-worktree-status-projection'
 import { selectFreshExplicitAgentStatusRow } from '../../runtime-hook-agent-row-selection'
-
-/** Resident TUIs (pi-family-events.ts) whose turn boundary is their own `before_agent_start`,
- *  not the shell command the 133;D frame would close. */
-const RESIDENT_AGENT_TURN_SOURCES: ReadonlySet<string> = new Set(['pi', 'omp', 'prime-agent'])
+import { isPiCompatibleAgentType } from '../../../../shared/pi-agent-kind'
 
 export abstract class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   protected abstract getExistingTerminalHandlesForPtyId(ptyId: string): string[]
@@ -154,7 +151,9 @@ export abstract class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends O
       })
       if (
         row &&
-        RESIDENT_AGENT_TURN_SOURCES.has(row.agentType) &&
+        // Resident TUIs (pi-family-events.ts) whose turn boundary is their own
+        // `before_agent_start`, not the shell command the 133;D frame would close.
+        isPiCompatibleAgentType(row.agentType) &&
         mapExplicitAgentStateToRuntimeTerminalStatus(row.state) !== 'idle'
       ) {
         return
