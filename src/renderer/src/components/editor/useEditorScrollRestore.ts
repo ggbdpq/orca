@@ -25,7 +25,10 @@ export function useEditorScrollRestore(
         clearTimeout(throttleTimer)
       }
       throttleTimer = setTimeout(() => {
-        // Why: a scroll burst while hidden (layout re-drop) must not overwrite the blur-time snapshot.
+        // Why: a scroll burst while hidden (layout re-drop) must not overwrite the blur-time
+        // snapshot. Accepted wedge risk: macOS can leave document.hidden stuck at true while the
+        // window is actually visible (see stale-document-visibility.ts), which pauses saves until
+        // the next blur — restore then reuses the last blur-time snapshot rather than fresh reads.
         if (!document.hidden) {
           setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
         }
