@@ -38,6 +38,7 @@ function refuseModel(detail?: string): never {
   )
 }
 
+/** Validates a requested OpenCode model on the execution host: verified legacy CLIs only check the model catalog, 2.0.16 gets full launch-context verification, everything else fails closed. */
 export async function prepareOpenCodeModelStartupInputs(
   options: StartupScope
 ): Promise<{ inputs: AgentStartupPlanInputs; launchConfig?: SleepingAgentLaunchConfig }> {
@@ -151,6 +152,7 @@ export async function prepareOpenCodeModelStartupInputs(
   }
 }
 
+/** Builds the OpenCode model startup plan after execution-host validation; refuses draft delivery for resume-capable launches. */
 export async function buildExecutionHostAgentStartupPlan(
   options: StartupScope & {
     prompt: string
