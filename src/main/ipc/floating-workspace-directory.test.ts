@@ -186,6 +186,7 @@ describe('floating workspace directory', () => {
       })
     ).resolves.toBe(canonicalSelectedDir)
     await expect(
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the sanitizer only reads the settings members createStore() stubs.
       sanitizeFloatingWorkspaceDirectorySetting(store as never, selectedDir)
     ).resolves.toBe(canonicalSelectedDir)
   })
