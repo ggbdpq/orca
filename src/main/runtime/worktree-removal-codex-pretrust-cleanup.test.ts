@@ -19,14 +19,17 @@ const FOLDER_SUFFIX = '::workspace:5e8cc6b2-1d3f-4a5b-9c2d-7f6e5a4b3c2d'
 function makeRuntimePurge(meta: Record<string, unknown> = {}) {
   const store = {
     getWorktreeMeta: () => meta,
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fake only supplies the meta/query members these cases drive.
     getRepos: () => [] as never[],
     removeWorktreeMeta: () => {},
     getRepo: () => undefined,
     getSettings: () => ({})
   }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the service constructor only reads the store members the fake supplies.
   const runtime = new OrcaRuntimeService(store as never)
   return (worktreeId: string, hostId?: string) =>
     (
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the suite spies one private member by its exact declared shape.
       runtime as unknown as {
         removeWorktreeMetadataAndHistory: (
           store: unknown,
@@ -147,14 +150,17 @@ describe('worktree removal cleans up the Codex pretrust Orca wrote', () => {
     })
     const store = {
       getWorktreeMeta: () => ({}),
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fake only supplies the meta/query members these cases drive.
       getRepos: () => [] as never[],
       removeWorktreeMeta: () => {},
       getRepo: () => undefined,
       getSettings: () => ({})
     }
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the service constructor only reads the store members the fake supplies.
     const runtime = new OrcaRuntimeService(store as never)
     const purgeSpy = vi
       .spyOn(
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the suite spies one private member by its exact declared shape.
         runtime as unknown as {
           removeWorktreeMetadataAndHistory: (store: unknown, worktreeId: string) => Promise<void>
         },
@@ -162,6 +168,7 @@ describe('worktree removal cleans up the Codex pretrust Orca wrote', () => {
       )
       .mockReturnValue(purgeParked)
     const cleanupRemovedFolderWorkspaceState = (
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the suite reads one private member by its exact declared shape.
       runtime as unknown as {
         projectGroups: {
           deps: {

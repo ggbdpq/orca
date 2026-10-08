@@ -73,7 +73,10 @@ export async function purgeRemovedWorktreeHostState(
   runtime.invalidateWorktreeScanCacheForRepo(repoId)
   // Why scoped: upstream narrowed the invalidation to the removed repo (#23952 follow-up),
   // so a stale entry for one repo no longer evicts every other repo's cached roots.
-  invalidateAuthorizedRootsCacheForRepo(store, repoId)
+  const fullStore =
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the scoped invalidation only reads store.getRepos() (registered-worktree-roots-cache synchronizeOwners), which RuntimeStore already carries.
+    store as unknown as Parameters<typeof invalidateAuthorizedRootsCacheForRepo>[0]
+  invalidateAuthorizedRootsCacheForRepo(fullStore, repoId)
   await metadataAndHistory
 }
 
