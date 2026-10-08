@@ -138,7 +138,14 @@ export function findPreferredRenderRowIndexForWorktreeIdentity(
         (!worktree.hostId ||
           getWorktreeHostIdentity(folderWorkspaceToWorktree(row.folderWorkspace)) === identity)
       ) {
-        return index
+        // Why: duplicate folder rows follow the same visible-copy preference as item
+        // rows — a reveal must not yank the viewport off the copy the user sees (#24852).
+        if (fallbackIndex === -1) {
+          fallbackIndex = index
+        }
+        if (visibleIndex === -1 && isVisibleRow?.(row)) {
+          visibleIndex = index
+        }
       }
       continue
     }
