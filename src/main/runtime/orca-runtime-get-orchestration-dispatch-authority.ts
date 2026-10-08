@@ -25,10 +25,7 @@ import { resolveStructuredWorkerAuthority } from './structured-worker-authority'
 import { matchesProcessIncarnation } from './orchestration/worker-terminal-process-liveness'
 import { mapExplicitAgentStateToRuntimeTerminalStatus } from './runtime-worktree-status-projection'
 import { selectFreshExplicitAgentStatusRow } from './runtime-hook-agent-row-selection'
-
-/** Resident TUIs (pi-family-events.ts) whose turn boundary is their own `before_agent_start`,
- *  not the shell command the 133;D frame would close. */
-const RESIDENT_AGENT_TURN_SOURCES: ReadonlySet<string> = new Set(['pi', 'omp', 'prime-agent'])
+import { isPiCompatibleAgentType } from '../../shared/pi-agent-kind'
 
 export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   /** Every pane key this PTY could be addressed by, including restored receipts. */
@@ -145,7 +142,9 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
       })
       if (
         row &&
-        RESIDENT_AGENT_TURN_SOURCES.has(row.agentType) &&
+        // Resident TUIs (pi-family-events.ts) whose turn boundary is their own
+        // `before_agent_start`, not the shell command the 133;D frame would close.
+        isPiCompatibleAgentType(row.agentType) &&
         mapExplicitAgentStateToRuntimeTerminalStatus(row.state) !== 'idle'
       ) {
         return
