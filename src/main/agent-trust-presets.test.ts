@@ -256,6 +256,17 @@ describe('markAntigravityWorkspaceTrusted', () => {
   })
 })
 
+// Mirrors kimi-code's workspaceRootKey normalization (backslashes to slashes,
+// trailing-slash strip, lowercase for Windows-shaped roots), which the writer
+// replicates too. win32's realpathSync returns backslash spellings, so the
+// expected keys below must normalize the same way to stay oracle-accurate.
+function expectedKeyRoot(resolved: string): string {
+  const slashed = resolved.replaceAll('\\', '/')
+  const winShaped = /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/.test(slashed)
+  const normalized = slashed.replace(/\/+$/, '')
+  return winShaped ? normalized.toLowerCase() : normalized
+}
+
 describe('markKimiWorkspaceTrusted', () => {
   // The key contract: Kimi Code looks its trust record up by
   // `wd_<basename-slug>_<12 hex of sha256(canonical root)>` under
@@ -272,9 +283,11 @@ describe('markKimiWorkspaceTrusted', () => {
       expect(entries).toHaveLength(1)
 
       // canonicalWorkspaceRoot is path.resolve on posix; the record lands under
-      // the resolved spelling Kimi's own launch cwd produces.
+      // the resolved spelling Kimi's own launch cwd produces, keyed after
+      // workspaceRootKey normalization.
       const resolved = realpathSync(workspace)
-      const base = resolved.split('/').pop() ?? resolved
+      const keyRoot = expectedKeyRoot(resolved)
+      const base = keyRoot.split('/').pop() ?? keyRoot
       const slug =
         base
           .toLowerCase()
@@ -282,7 +295,7 @@ describe('markKimiWorkspaceTrusted', () => {
           .replaceAll(/^-+|-+$/g, '')
           .slice(0, 40)
           .replaceAll(/^-+|-+$/g, '') || 'workspace'
-      const hash = createHash('sha256').update(resolved).digest('hex').slice(0, 12)
+      const hash = createHash('sha256').update(keyRoot).digest('hex').slice(0, 12)
       expect(entries[0]).toBe(`wd_${slug}_${hash}`)
 
       const payload = JSON.parse(readFileSync(join(trustDir, entries[0]), 'utf-8'))
@@ -303,7 +316,10 @@ describe('markKimiWorkspaceTrusted', () => {
       markKimiWorkspaceTrusted(workspace, testState.fakeHomeDir)
       const trustDir = join(testState.fakeHomeDir, '.kimi-code', 'workspace-trust')
       const entries = readdirSync(trustDir)
-      const hash = createHash('sha256').update(realpathSync(workspace)).digest('hex').slice(0, 12)
+      const hash = createHash('sha256')
+        .update(expectedKeyRoot(realpathSync(workspace)))
+        .digest('hex')
+        .slice(0, 12)
       expect(entries).toEqual([`wd_my-repo_${hash}`])
     } finally {
       rmSync(parent, { recursive: true, force: true })
