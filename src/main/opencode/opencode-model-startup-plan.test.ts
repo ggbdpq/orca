@@ -121,6 +121,40 @@ describe('execution-host OpenCode model startup', () => {
       expect((await buildExecutionHostAgentStartupPlan(scope()))?.launchCommand).toContain(
         '--model'
       )
+      expect(probeOpenCodeModelAvailability).toHaveBeenCalledWith(
+        expect.objectContaining({ model: preferred, cwd: '/private/project' })
+      )
+      expect(probeOpenCodeLaunchModelContext).not.toHaveBeenCalled()
+    }
+  )
+
+  it('refuses an unavailable model on the verified legacy route', async () => {
+    vi.mocked(probeOpenCodeLaunchCapabilities).mockResolvedValue({
+      version: '1.18.35',
+      pluginApi: 'v1',
+      promptMode: 'submit'
+    })
+    vi.mocked(probeOpenCodeModelAvailability).mockResolvedValue(false)
+
+    await expect(buildExecutionHostAgentStartupPlan(scope())).rejects.toMatchObject({
+      code: 'capability_unsupported'
+    })
+    expect(probeOpenCodeLaunchModelContext).not.toHaveBeenCalled()
+  })
+
+  it.each(['--agent build', '--continue', '--server http://localhost'])(
+    'refuses verified-legacy manual launch arguments %s',
+    async (agentArgs) => {
+      vi.mocked(probeOpenCodeLaunchCapabilities).mockResolvedValue({
+        version: '1.18.35',
+        pluginApi: 'v1',
+        promptMode: 'submit'
+      })
+      const options = scope()
+      options.inputs.agentArgs = agentArgs
+      await expect(buildExecutionHostAgentStartupPlan(options)).rejects.toMatchObject({
+        code: 'capability_unsupported'
+      })
       expect(probeOpenCodeLaunchModelContext).not.toHaveBeenCalled()
     }
   )

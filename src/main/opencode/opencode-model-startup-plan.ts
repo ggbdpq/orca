@@ -94,6 +94,9 @@ export async function prepareOpenCodeModelStartupInputs(
     if (!(await probeOpenCodeModelAvailability({ command, model, cwd: options.cwd, env }))) {
       refuseModel()
     }
+    if (inputs.agentArgs?.trim()) {
+      refuseModel()
+    }
     return { inputs }
   }
   if (capabilities?.version !== '2.0.16') {
