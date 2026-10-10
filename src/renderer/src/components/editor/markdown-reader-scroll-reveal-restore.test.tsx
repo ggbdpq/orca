@@ -27,7 +27,7 @@ type HarnessProps = {
 
 function PreviewHarness({ containerRef, scrollCacheKey, renderedContent }: HarnessProps) {
   useMarkdownPreviewScrollViewport({
-    // SAFETY: the hook only reads { rootRef, renderedContent } from the foundation.
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the hook only reads { rootRef, renderedContent } from the foundation, so the harness supplies a partial object asserted to the full foundation shape.
     foundation: { rootRef: containerRef, renderedContent } as Parameters<
       typeof useMarkdownPreviewScrollViewport
     >[0]['foundation'],
@@ -71,7 +71,7 @@ describe.each(HARNESS_CASES)('$name reveal restore', ({ Harness }) => {
   })
 
   async function mountHarness(): Promise<HTMLDivElement> {
-    const containerRef = { current: null } as React.RefObject<HTMLDivElement | null>
+    const containerRef: React.RefObject<HTMLDivElement | null> = { current: null }
     await act(async () => {
       root.render(
         <Harness
