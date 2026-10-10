@@ -18,19 +18,36 @@ export function useMarkdownPreviewScrollViewport({
     }
 
     let throttleTimer: ReturnType<typeof setTimeout> | null = null
+    // The last position read while the document was visible: a throttled save that
+    // fires after the window was hidden must store this instead of the hidden
+    // viewport's (possibly zeroed) scrollTop, and blur then has no live value to
+    // flush. Cleared on use so a later visible save reads the live position again.
+    let pendingVisibleScrollTop: number | null = null
+
+    const savePendingScroll = (): void => {
+      const visibleScrollTop = pendingVisibleScrollTop
+      pendingVisibleScrollTop = null
+      if (visibleScrollTop !== null) {
+        setWithLRU(scrollTopCache, scrollCacheKey, visibleScrollTop)
+      } else if (!document.hidden) {
+        setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
+      }
+    }
 
     const onScroll = (): void => {
+      if (!document.hidden) {
+        pendingVisibleScrollTop = container.scrollTop
+      }
       if (throttleTimer !== null) {
         clearTimeout(throttleTimer)
       }
       throttleTimer = setTimeout(() => {
-        // Why: a scroll burst while hidden (layout re-drop) must not overwrite the blur-time
-        // snapshot. Accepted wedge risk: macOS can leave document.hidden stuck at true while the
-        // window is actually visible (see stale-document-visibility.ts), which pauses saves until
-        // the next blur — restore then reuses the last blur-time snapshot rather than fresh reads.
-        if (!document.hidden) {
-          setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
-        }
+        // Why: a scroll burst while hidden (layout re-drop) must not overwrite the
+        // last visible snapshot. Accepted wedge risk: macOS can leave document.hidden
+        // stuck at true while the window is actually visible (see
+        // stale-document-visibility.ts); saves then keep that snapshot until the next
+        // blur — restore reuses it rather than fresh reads.
+        savePendingScroll()
         throttleTimer = null
       }, 150)
     }
@@ -43,7 +60,7 @@ export function useMarkdownPreviewScrollViewport({
       }
       clearTimeout(throttleTimer)
       throttleTimer = null
-      setWithLRU(scrollTopCache, scrollCacheKey, container.scrollTop)
+      savePendingScroll()
     }
     const reanchorAfterReveal = (): void => {
       const cached = scrollTopCache.get(scrollCacheKey)
