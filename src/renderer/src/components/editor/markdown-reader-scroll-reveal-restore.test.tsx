@@ -178,6 +178,41 @@ describe.each(HARNESS_CASES)('$name reveal restore', ({ Harness }) => {
     }
   })
 
+  it('saves the last visible position when the throttled save fires after the window was hidden', async () => {
+    const container = await mountHarness()
+
+    act(() => {
+      container.scrollTop = 1200
+      container.dispatchEvent(new Event('scroll'))
+    })
+    // the window is occluded before the 150 ms throttle elapses; the OS then
+    // drops the container's position, so a hidden-time read is useless
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+    try {
+      act(() => {
+        container.scrollTop = 0
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(200)
+      })
+      expect(scrollTopCache.get(scrollCacheKey)).toBe(1200)
+
+      // blur finds no pending timer anymore; the visible snapshot is already saved
+      act(() => {
+        window.dispatchEvent(new Event('blur'))
+      })
+      expect(scrollTopCache.get(scrollCacheKey)).toBe(1200)
+
+      act(() => {
+        window.dispatchEvent(new Event('focus'))
+      })
+      expect(container.scrollTop).toBe(1200)
+    } finally {
+      Reflect.deleteProperty(document, 'hidden')
+    }
+  })
+
   it('stays idle without a cache and never overrides live or deliberately-top positions', async () => {
     const container = await mountHarness()
 
