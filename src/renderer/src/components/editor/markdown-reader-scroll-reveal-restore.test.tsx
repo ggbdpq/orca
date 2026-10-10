@@ -178,6 +178,60 @@ describe.each(HARNESS_CASES)('$name reveal restore', ({ Harness }) => {
     }
   })
 
+  it('re-anchors from the pending visible snapshot when focus fires before the throttled save', async () => {
+    const container = await mountHarness()
+
+    act(() => {
+      container.scrollTop = 1200
+      container.dispatchEvent(new Event('scroll'))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+
+    // a newer visible scroll arms the throttle, then the OS drops the position
+    // before the 150 ms save runs: reveal must anchor from that pending
+    // snapshot, not the stale cached entry
+    act(() => {
+      container.scrollTop = 1500
+      container.dispatchEvent(new Event('scroll'))
+      container.scrollTop = 0
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(container.scrollTop).toBe(1500)
+    expect(scrollTopCache.get(scrollCacheKey)).toBe(1500)
+
+    // the reveal flush consumed the timer; the later tick and blur must not
+    // resurrect stale data
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+      window.dispatchEvent(new Event('blur'))
+    })
+    expect(container.scrollTop).toBe(1500)
+    expect(scrollTopCache.get(scrollCacheKey)).toBe(1500)
+  })
+
+  it('re-anchors from the pending visible snapshot when visibility turns before the throttled save', async () => {
+    const container = await mountHarness()
+
+    act(() => {
+      container.scrollTop = 1200
+      container.dispatchEvent(new Event('scroll'))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+
+    act(() => {
+      container.scrollTop = 1500
+      container.dispatchEvent(new Event('scroll'))
+      container.scrollTop = 0
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(container.scrollTop).toBe(1500)
+    expect(scrollTopCache.get(scrollCacheKey)).toBe(1500)
+  })
+
   it('saves the last visible position when the throttled save fires after the window was hidden', async () => {
     const container = await mountHarness()
 
