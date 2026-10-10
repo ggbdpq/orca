@@ -65,6 +65,9 @@ export function useMarkdownPreviewScrollViewport({
       savePendingScroll()
     }
     const reanchorAfterReveal = (): void => {
+      // Why: the pending throttled save holds the newest visible position; flush
+      // it so re-anchoring reads that snapshot instead of a stale cache entry.
+      flushPendingSave()
       const cached = scrollTopCache.get(scrollCacheKey)
       if (
         cached === undefined ||
