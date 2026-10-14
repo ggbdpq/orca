@@ -190,6 +190,34 @@ describe('keybindings', () => {
     }
   })
 
+  it('keeps same-type tab cycling active in terminal-first mode', () => {
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      const modifiers = {
+        meta: platform === 'darwin',
+        control: platform !== 'darwin',
+        alt: true
+      }
+      expect(
+        keybindingMatchesAction(
+          'tab.nextSameType',
+          { key: ']', code: 'BracketRight', ...modifiers, shift: false },
+          platform,
+          undefined,
+          { context: 'terminal', terminalShortcutPolicy: 'terminal-first' }
+        )
+      ).toBe(true)
+      expect(
+        keybindingMatchesAction(
+          'tab.previousSameType',
+          { key: '[', code: 'BracketLeft', ...modifiers, shift: false },
+          platform,
+          undefined,
+          { context: 'terminal', terminalShortcutPolicy: 'terminal-first' }
+        )
+      ).toBe(true)
+    }
+  })
+
   it('keeps terminal clipboard shortcuts platform-native without stealing bare Ctrl+A', () => {
     expect(getEffectiveKeybindingsForAction('terminal.copySelection', 'darwin')).toEqual(['Mod+C'])
     expect(getEffectiveKeybindingsForAction('terminal.copySelection', 'linux')).toEqual([
