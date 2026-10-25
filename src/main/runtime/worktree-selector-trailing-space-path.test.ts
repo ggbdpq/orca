@@ -4,11 +4,7 @@
 // serialization layer started eating the space (#25386 cross-machine selector_not_found).
 import { describe, expect, it } from 'vitest'
 import { parseWorktreeList } from '../../shared/git-worktree-porcelain-parser'
-import {
-  splitWorktreeId,
-  worktreeIdComparisonKey,
-  worktreeIdsEqual
-} from '../../shared/worktree/id'
+import { splitWorktreeId, worktreeIdentityKey, worktreeIdsEqual } from '../../shared/worktree/id'
 import { runtimePathsEqual } from './runtime-worktree-path-identity'
 
 const REPO_ID = '01234567-89ab-cdef-0123-456789abcdef'
@@ -37,7 +33,7 @@ describe('trailing-space paths survive the selector chain', () => {
       worktreePath: SPACED_WORKTREE_PATH
     })
     expect(worktreeIdsEqual(worktreeId, `${REPO_ID}::${SPACED_WORKTREE_PATH}`)).toBe(true)
-    expect(worktreeIdComparisonKey(worktreeId)).toBe(
+    expect(worktreeIdentityKey(worktreeId)).toBe(
       `${REPO_ID}::${SPACED_WORKTREE_PATH.normalize('NFC')}`
     )
   })
