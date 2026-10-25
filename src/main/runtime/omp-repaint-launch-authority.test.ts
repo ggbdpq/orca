@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer } from '../agent-hooks/server'
 import { OrcaRuntimeService } from './orca-runtime'
 import { makeStore } from './runtime-rpc-worktree-store-fixtures'
+import { spawnedPtyEnv } from './spawned-pty-env-fixtures'
+import { committingSpawn } from './bind-first-pane.test-fixture'
 
 // #24436: a resident OMP TUI repaints its transcript (resize, split, sidebar switches) and
 // re-emits the rendered user message's OSC 133;A..D marks mid-turn. Those marks must not
@@ -48,7 +50,10 @@ async function launchOmpPane(ptyId: string): Promise<LaunchedOmpPane> {
   const server = new AgentHookServer()
   await server.start({ env: 'production' })
   const incarnationId = 'omp-incarnation-1'
-  const spawn = vi.fn().mockResolvedValue({ id: ptyId, incarnationId })
+  const spawn = vi.fn(async (_args: { worktreeId?: string; tabId?: string; leafId?: string }) => ({
+    id: ptyId,
+    incarnationId
+  }))
   const runtime = new OrcaRuntimeService(makeStore() as never, undefined, {
     retireAgentHookCompatibilityAuthority: (paneKey) => server.retirePaneAuthority(paneKey),
     attestAgentHookCompatibilityAuthority: (candidate) =>
@@ -57,7 +62,7 @@ async function launchOmpPane(ptyId: string): Promise<LaunchedOmpPane> {
       server.getStatusSnapshot().filter((entry) => entry.providerSessionOnly !== true)
   })
   runtime.setPtyController({
-    spawn,
+    spawn: committingSpawn(runtime, spawn),
     write: () => true,
     kill: () => true,
     getForegroundProcess: async () => 'omp'
@@ -67,9 +72,9 @@ async function launchOmpPane(ptyId: string): Promise<LaunchedOmpPane> {
     launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} },
     launchAgent: 'omp'
   })
-  const env = (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
-  const paneKey = env.ORCA_PANE_KEY as string
-  const launchToken = env.ORCA_AGENT_LAUNCH_TOKEN as string
+  const env = spawnedPtyEnv(spawn.mock.calls[0]?.[0])
+  const paneKey = env.ORCA_PANE_KEY
+  const launchToken = env.ORCA_AGENT_LAUNCH_TOKEN
   expect(paneKey).toBeTruthy()
   expect(launchToken).toBeTruthy()
   return {
