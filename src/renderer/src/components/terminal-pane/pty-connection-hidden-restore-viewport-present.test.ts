@@ -127,19 +127,57 @@ function createDeps(overrides: Record<string, unknown> = {}) {
   return buildPaneConnectionDeps(() => mockStoreState, overrides)
 }
 
-// #33684: a hidden-delivery-gate restore writes its last byte, then the pane must be
-// presented (full-viewport refresh) AFTER that write. Reveal races the IntersectionObserver
-// and xterm's render pause; writes that land after the last present are swallowed into
-// stale pixels until a selection/scroll forces a repaint.
-function expectPresentAfterLastWrite(
+// #33684: the restore's final present must run after xterm parses the transaction's last
+// write, not merely after its submission: presenting early paints a pre-parse buffer, and
+// a render latch still paused at parse time swallows the follow-up dirty-row refresh. Real
+// xterm parses asynchronously, so the mock parks write callbacks until the test releases
+// them in FIFO order — the order xterm's WriteBuffer guarantees.
+function deferTerminalParseCallbacks(pane: ReturnType<typeof createPane>): {
+  parseTick: ReturnType<typeof vi.fn>
+  flushParse: () => void
+} {
+  const queued: (() => void)[] = []
+  const parseTick = vi.fn((callback: () => void) => callback())
+  pane.terminal.write.mockImplementation((_data: string | Uint8Array, callback?: () => void) => {
+    if (callback) {
+      queued.push(callback)
+    }
+  })
+  return {
+    parseTick,
+    flushParse: () => {
+      const pending = queued.splice(0)
+      for (const callback of pending) {
+        parseTick(callback)
+      }
+    }
+  }
+}
+
+// While the transaction's parse is still parked, no viewport refresh may follow its last
+// write submission: a refresh there presented the pre-parse buffer.
+function expectNoPresentAfterLastWriteSubmission(
   pane: ReturnType<typeof createPane>,
-  refresh: ReturnType<typeof vi.fn>
+  presentSink: ReturnType<typeof vi.fn>
 ): void {
   const writeOrder = pane.terminal.write.mock.invocationCallOrder
-  const refreshOrder = refresh.mock.invocationCallOrder
   expect(writeOrder.length).toBeGreaterThan(0)
-  expect(refreshOrder.length).toBeGreaterThan(0)
-  expect(refreshOrder.at(-1)!).toBeGreaterThan(writeOrder.at(-1)!)
+  for (const order of presentSink.mock.invocationCallOrder) {
+    expect(order).toBeLessThan(writeOrder.at(-1)!)
+  }
+}
+
+// Once the parked parses complete, the deferred present must follow the final parse.
+function expectPresentAfterParseFlush(
+  presentSink: ReturnType<typeof vi.fn>,
+  presentCountBeforeParse: number,
+  parseTick: ReturnType<typeof vi.fn>
+): void {
+  expect(parseTick).toHaveBeenCalled()
+  expect(presentSink.mock.invocationCallOrder.length).toBeGreaterThan(presentCountBeforeParse)
+  expect(presentSink.mock.invocationCallOrder.at(-1)!).toBeGreaterThan(
+    parseTick.mock.invocationCallOrder.at(-1)!
+  )
 }
 
 describe('connectPanePty hidden-output restore viewport present', () => {
@@ -221,6 +259,7 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     }>()
     getSnapshot.mockReturnValueOnce(snapshotDeferred.promise)
     const { pane, refresh, onData, isVisibleRef, disposable } = await connectHiddenClaudePane()
+    const { parseTick, flushParse } = deferTerminalParseCallbacks(pane)
 
     onData?.(hiddenChunk, { seq: hiddenChunk.length, rawLength: hiddenChunk.length })
     const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
@@ -245,7 +284,13 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     await flushAsyncTicks(30)
     expect(getSnapshot).toHaveBeenCalledTimes(1)
 
-    expectPresentAfterLastWrite(pane, refresh)
+    // The drained bytes have not parsed yet: presenting here would paint the pre-parse
+    // buffer, so the restore must not have presented at write time.
+    expectNoPresentAfterLastWriteSubmission(pane, refresh)
+    const presentCountBeforeParse = refresh.mock.invocationCallOrder.length
+    flushParse()
+    await flushAsyncTicks(30)
+    expectPresentAfterParseFlush(refresh, presentCountBeforeParse, parseTick)
     // The plain fixture carries no render service, so this present degraded to the refresh fallback.
     expect(refresh).toHaveBeenCalledWith(0, pane.terminal.rows - 1)
 
@@ -265,6 +310,7 @@ describe('connectPanePty hidden-output restore viewport present', () => {
       seq: 64
     })
     const { pane, refresh, onData, isVisibleRef, disposable } = await connectHiddenClaudePane()
+    const { parseTick, flushParse } = deferTerminalParseCallbacks(pane)
 
     onData?.(hiddenChunk, { seq: 20, rawLength: 20 })
     const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
@@ -277,9 +323,17 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     // Queued while the restore is in flight, drained after the snapshot paints.
     onData?.(liveChunk, { seq: 84, rawLength: liveChunk.length })
     await flushAsyncTicks(30)
+    // The snapshot replay stalls at its parse barrier; releasing it lets the coordinator
+    // drain the queued live chunk and arm the transaction's final parse barrier.
+    flushParse()
+    await flushAsyncTicks(30)
     await flushAsyncTicks(30)
 
-    expectPresentAfterLastWrite(pane, refresh)
+    expectNoPresentAfterLastWriteSubmission(pane, refresh)
+    const presentCountBeforeParse = refresh.mock.invocationCallOrder.length
+    flushParse()
+    await flushAsyncTicks(30)
+    expectPresentAfterParseFlush(refresh, presentCountBeforeParse, parseTick)
     // The plain fixture carries no render service, so this present degraded to the refresh fallback.
     expect(refresh).toHaveBeenCalledWith(0, pane.terminal.rows - 1)
     disposable.dispose()
@@ -301,6 +355,7 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     const { pane, refresh, renderService, onData, isVisibleRef, disposable } =
       await connectHiddenClaudePane({}, { pausedRenderService: true })
     const service = renderService!
+    const { parseTick, flushParse } = deferTerminalParseCallbacks(pane)
 
     onData?.(hiddenChunk, { seq: hiddenChunk.length, rawLength: hiddenChunk.length })
     const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
@@ -325,7 +380,12 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     await flushAsyncTicks(30)
     expect(getSnapshot).toHaveBeenCalledTimes(1)
 
-    expectPresentAfterLastWrite(pane, service.refreshRows)
+    // The drained bytes have not parsed yet: no full repaint may have been requested.
+    expectNoPresentAfterLastWriteSubmission(pane, service.refreshRows)
+    const presentCountBeforeParse = service.refreshRows.mock.invocationCallOrder.length
+    flushParse()
+    await flushAsyncTicks(30)
+    expectPresentAfterParseFlush(service.refreshRows, presentCountBeforeParse, parseTick)
     // The paused present released the latch itself instead of waiting for the observer.
     expect(service._isPaused).toBe(false)
     expect(service._needsFullRefresh).toBe(false)
