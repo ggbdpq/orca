@@ -113,5 +113,8 @@ export function bindAbandonHiddenOutputRestore(session: ConnectPanePtySession): 
     if (pendingData) {
       session.writePtyOutputToXterm(pendingData, true)
     }
+    // The drain above is the transaction's last write; present after it or a reveal racing
+    // the render-pause latch keeps those bytes as stale pixels (#33684).
+    session.presentRestoredViewport()
   }
 }

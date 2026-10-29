@@ -14,6 +14,15 @@ import type { ConnectPanePtySession } from './connect-pane-pty-session'
 import type { PendingHiddenOutputRestoreChunk } from './pending-hidden-output-restore-chunk'
 
 export function bindHiddenOutputRestoreDrain(session: ConnectPanePtySession): void {
+  // The restore succeeded: retire the latch, drop the deadline, and present after the
+  // transaction's last byte so a reveal racing the render-pause latch cannot keep stale
+  // pixels on screen (#33684).
+  session.finishHiddenOutputRestore = function (): void {
+    session.hiddenOutputRestoreNeeded = false
+    session.hiddenOutputRestorePtyId = null
+    session.clearHiddenOutputRestoreForegroundDeadlineTimer()
+    session.presentRestoredViewport()
+  }
   // 'drained' = painted all queued bytes; 'overflow' = queue blew its cap (stream outran fetch+replay); 'refetch' = offsets unmappable, need a fresher snapshot.
   session.drainPendingLiveChunksAfterSnapshot = function (
     snapshotSeq: number | undefined
