@@ -226,6 +226,8 @@ describe('registerClipboardHandlers', () => {
   })
 
   it('registers normal and selection text clipboard IPC handlers', async () => {
+    // Platform-neutral registration semantics; the macOS bounded read has its own tests.
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const values = { standard: 'standard text', selection: 'selection text' }
     clipboardReadTextMock.mockImplementation((type?: string) =>
       type === 'selection' ? values.selection : values.standard
@@ -507,6 +509,7 @@ describe('registerClipboardHandlers', () => {
   })
 
   it('rejects oversized text clipboard IPC reads without returning clipboard contents', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     clipboardReadTextMock.mockImplementation((clipboardType?: string) =>
       clipboardType === 'selection' ? 'selection secret' : 'standard secret'
     )
@@ -524,6 +527,7 @@ describe('registerClipboardHandlers', () => {
 
   it('yields while measuring large accepted text clipboard IPC reads', async () => {
     vi.useFakeTimers()
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const text = 'é'.repeat(300_000)
     clipboardReadTextMock.mockReturnValue(text)
 
