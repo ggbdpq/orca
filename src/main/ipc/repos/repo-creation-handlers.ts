@@ -121,7 +121,7 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
         // Why: an unexpected probe failure (EACCES...) must not fall back to the trimmed
         // spelling and create the project in a directory the user did not pick.
         const message = err instanceof Error ? err.message : String(err)
-        return { error: `Cannot access parent directory: ${message}` }
+        return repoCreateFailure('parentInaccessible', { detail: message })
       }
       // Why: IPC input is untrusted — coerce to the narrow union so a bogus kind can't skip git init yet persist in the store.
       const repoKind: 'git' | 'folder' = args.kind === 'folder' ? 'folder' : 'git'

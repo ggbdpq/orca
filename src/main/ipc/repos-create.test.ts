@@ -299,7 +299,11 @@ describe('repos:create', () => {
 
     const result = await callCreate({ parentPath: lockedParent, name: 'proj', kind: 'folder' })
 
-    expect(result).toMatchObject({ error: expect.stringContaining('EACCES') })
+    expect(result).toEqual({
+      error: 'Cannot access parent directory: EACCES: permission denied, access',
+      errorCode: 'parentInaccessible',
+      errorDetail: 'EACCES: permission denied, access'
+    })
     expect(mkdirMock).not.toHaveBeenCalled()
     expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
