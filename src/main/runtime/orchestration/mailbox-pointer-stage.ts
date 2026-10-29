@@ -133,15 +133,11 @@ function finishPointerWriteAndStageEnter<TWaiter extends OrchestrationMessageWai
       }
       return
     }
-    if (
-      !db ||
-      shouldReleaseOrchestrationPointer(
-        db,
-        args.mailboxHandle,
-        args.messages,
-        args.deps.getMessageWaiters(args.mailboxHandle)
-      )
-    ) {
+    // Once the notice text was accepted by the PTY it commits to the delayed Enter: a
+    // stale notice is a harmless `check` prompt, while skipping the Enter here would
+    // strand the typed text in the agent's prompt (#36014). Eligibility was already
+    // decided before the write above.
+    if (!db) {
       if (args.state.clearWatermark(args.mailboxHandle, args.newestSequence, ptyId)) {
         args.redrive(args.mailboxHandle)
       }

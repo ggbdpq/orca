@@ -123,10 +123,17 @@ describe('orchestration mailbox cold-park idle continuation', () => {
     const later = insertDirectRunMessage(db, run.id, 'Deliver after pointer settlement')
     harness.runtime.deliverPendingMessagesForHandle(TERMINAL_HANDLE)
     await vi.advanceTimersByTimeAsync(0)
+    // The typed notice owns the watermark until its delayed Enter commits, so the new
+    // mail parks behind it instead of typing a second pointer on top of the draft.
+    expect(pointerCount(harness.write)).toBe(1)
+
+    // The stale notice is committed anyway (a harmless attention prompt, #36014) and its
+    // watermark release drains the parked delivery.
+    await vi.advanceTimersByTimeAsync(500)
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
     expect(pointerCount(harness.write)).toBe(2)
 
     await vi.advanceTimersByTimeAsync(500)
-    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
     expect(db.getMessageById(later.id)?.delivered_at).toEqual(expect.any(String))
     db.close()
   })

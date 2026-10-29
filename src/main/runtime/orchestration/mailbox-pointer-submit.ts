@@ -105,32 +105,35 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
       } else if (!queueSafe) {
         releaseWithoutRedrive = true
       } else {
-        if (
-          shouldReleaseOrchestrationPointer(
-            deps.getDb(),
-            input.mailboxHandle,
-            input.messages,
-            deps.getMessageWaiters(input.mailboxHandle)
-          )
-        ) {
-          releaseWithoutRedrive = true
-        } else {
-          preserveAmbiguousDelivery = true
-          const db = deps.getDb()
-          if (!db?.markMailboxPointerEnterAttempted(messageIds, reservationTarget)) {
-            return
-          }
+        const db = deps.getDb()
+        // A stale notice — its mail was read inside the Enter window — still commits the
+        // already-typed text: `check` then returns the next batch or nothing, which is
+        // harmless, while skipping the Enter would strand the text in the prompt (#36014).
+        const stale = shouldReleaseOrchestrationPointer(
+          db,
+          input.mailboxHandle,
+          input.messages,
+          deps.getMessageWaiters(input.mailboxHandle)
+        )
+        if (!db) {
+          return
+        }
+        preserveAmbiguousDelivery = true
+        if (!stale && !db.markMailboxPointerEnterAttempted(messageIds, reservationTarget)) {
+          return
+        }
+        if (!stale) {
           expectedPhase = MAILBOX_POINTER_ENTER_ATTEMPTED
-          const enterSettlement = await deps.writePty(input.ptyId, '\r')
-          submitted = enterSettlement.outcome === 'accepted'
-          if (!deps.state.isCurrentFlight(input.ptyId, input.flight)) {
-            finalizeReservation = false
-            return
-          }
-          // Unverifiable Enter stays attempted: neither delivery nor safe resend is proven.
-          if (enterSettlement.outcome === 'refused') {
-            releaseWithoutRedrive = true
-          }
+        }
+        const enterSettlement = await deps.writePty(input.ptyId, '\r')
+        submitted = enterSettlement.outcome === 'accepted'
+        if (!deps.state.isCurrentFlight(input.ptyId, input.flight)) {
+          finalizeReservation = false
+          return
+        }
+        // Unverifiable Enter stays attempted: neither delivery nor safe resend is proven.
+        if (enterSettlement.outcome === 'refused') {
+          releaseWithoutRedrive = true
         }
       }
     })

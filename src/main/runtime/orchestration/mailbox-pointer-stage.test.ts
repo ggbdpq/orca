@@ -226,6 +226,58 @@ describe('mailbox pointer staging watermark', () => {
   })
 })
 
+// Why: a notice whose mail was read inside the Enter window must not strand its typed
+// text in the composer; committing the Enter turns a stale notice into a harmless
+// `check` prompt, while stranded text corrupts the next human input (#36014).
+describe('a notice typed before its mail was read', () => {
+  it('still submits its Enter when the mail is read before the notice write settles', async () => {
+    const db = new OrchestrationDb(':memory:')
+    const message = db.insertMessage({ from: 'a', to: 'run:run-1', subject: 'mail' })
+    let resolveWrite!: (settlement: WriteSettlement) => void
+    const pendingWrite = (): Promise<WriteSettlement> =>
+      new Promise<WriteSettlement>((resolve) => {
+        resolveWrite = resolve
+      })
+    const writePty = vi.fn(
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the staged write stays pending until this test settles it, and staging treats a promise as unsettled.
+      (_ptyId: string, _data: string) => pendingWrite() as unknown as WriteSettlement
+    )
+    const state = new OrchestrationMailboxPointerState()
+    stageOrchestrationMailboxPointer({
+      ...stageArgs(db, state),
+      deps: pointerDeps(db, writePty),
+      messages: [{ id: message.id, type: 'status', sequence: 1 }]
+    } as never)
+
+    expect(writePty).toHaveBeenCalledOnce()
+    expect(writePty.mock.calls[0]?.[1]).toContain('You have 1 orchestration message')
+    // A check, a background receiver, or a coordinator script reads the mailbox here.
+    db.markAsReadAndDelivered([message.id])
+    resolveWrite(WRITE_ACCEPTED)
+
+    await vi.waitFor(() => expect(writePty).toHaveBeenLastCalledWith('pty-1', '\r'))
+    db.close()
+  })
+
+  it('still submits its Enter when the mail is read before the Enter timer fires', async () => {
+    const db = new OrchestrationDb(':memory:')
+    const message = db.insertMessage({ from: 'a', to: 'run:run-1', subject: 'mail' })
+    const writePty = vi.fn((_ptyId: string, _data: string) => WRITE_ACCEPTED)
+    const state = new OrchestrationMailboxPointerState()
+    stageOrchestrationMailboxPointer({
+      ...stageArgs(db, state),
+      deps: pointerDeps(db, writePty),
+      messages: [{ id: message.id, type: 'status', sequence: 1 }]
+    } as never)
+
+    expect(writePty).toHaveBeenCalledOnce()
+    db.markAsReadAndDelivered([message.id])
+
+    await vi.waitFor(() => expect(writePty).toHaveBeenLastCalledWith('pty-1', '\r'))
+    db.close()
+  })
+})
+
 describe('retiring a pty mid-delivery', () => {
   // Only provably unsubmitted phases may retry; an attempted Enter may already have landed.
   it('leaves an attempted Enter at its phase instead of making it redeliverable', async () => {

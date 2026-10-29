@@ -706,7 +706,9 @@ describe('orchestration notification mailbox consistency', () => {
     expect(checked).toMatchObject({ runId: run.id, count: 1 })
 
     await vi.advanceTimersByTimeAsync(500)
-    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
+    // The stale notice is still committed: the text was already typed, and a stranded
+    // draft would corrupt the next human input (#36014). The mail stays with the check.
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
     const redrive = vi.spyOn(harness.runtime, 'deliverPendingMessagesForHandle')
     harness.runtime.onPtyExit(PTY_ID, 0)
     await Promise.resolve()
