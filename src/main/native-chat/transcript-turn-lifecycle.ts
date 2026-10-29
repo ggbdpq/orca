@@ -11,6 +11,7 @@ import {
 import { decodeClaudeTranscriptLine } from './transcript-line-decoders-claude'
 import {
   claudeInterruptedMessageId,
+  claudePromptSubmitEndedByHook,
   CODEX_EVENT_TURN_ABORTED,
   CODEX_EVENT_TURN_COMPLETE,
   CODEX_EVENT_TURN_STARTED
@@ -83,6 +84,14 @@ export function decodeClaudeTurnLifecycle(
   if (interruptedMessageId) {
     // Injected interruption notices end the active generation; they never open a user turn.
     return { state: 'interrupted', turnId: interruptedMessageId, timestamp }
+  }
+  if (claudePromptSubmitEndedByHook(record)) {
+    // A hook blocked the prompt before any turn ran; without this row the hook's working never settles.
+    return {
+      state: 'interrupted',
+      turnId: extractString(record.uuid) ?? fallbackId,
+      timestamp
+    }
   }
   if (record.type === 'assistant') {
     const stopReason = message?.stop_reason

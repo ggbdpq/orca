@@ -336,4 +336,98 @@ describe('native chat transcript turn lifecycle', () => {
       timestamp: Date.parse('2026-07-16T23:46:01.000Z')
     })
   })
+
+  // Informational row captured from CLI 2.1.312: a UserPromptSubmit hook answered decision "block".
+  const HOOK_BLOCKED_ROW = {
+    parentUuid: null,
+    isSidechain: false,
+    type: 'system',
+    subtype: 'informational',
+    content: 'UserPromptSubmit operation blocked by hook:\nblocked\n\nOriginal prompt: hello world',
+    isMeta: false,
+    timestamp: '2026-10-29T13:21:22.447Z',
+    uuid: '0ccf46a7-49a3-45ae-b670-720b9f9bd8c8',
+    level: 'warning',
+    preventContinuation: true,
+    promptSubmitEnding: {
+      ending: { kind: 'blocked_by_hook', reason: 'blocked' },
+      promptKept: false
+    },
+    userType: 'external',
+    entrypoint: 'sdk-cli'
+  }
+
+  it.each([
+    {
+      name: 'decision "block"',
+      row: HOOK_BLOCKED_ROW
+    },
+    {
+      // Captured from CLI 2.1.312: the hook answered continue false, so the CLI stops the prompt.
+      name: 'continue false',
+      row: {
+        ...HOOK_BLOCKED_ROW,
+        uuid: '10fa99b5-0295-45e8-bdc1-99b1087f4577',
+        content: 'Operation stopped by hook: blocked',
+        promptSubmitEnding: {
+          ending: { kind: 'stopped_by_hook', reason: 'blocked' },
+          promptKept: true
+        }
+      }
+    },
+    {
+      // Captured from CLI 2.1.312: the hook exited 2 with the reason on stderr.
+      name: 'exit 2',
+      row: {
+        ...HOOK_BLOCKED_ROW,
+        uuid: 'bc5daa23-e77e-4816-9dba-9678af75c064',
+        content:
+          "UserPromptSubmit operation blocked by hook:\n[echo 'blocked reason from stderr' >&2; exit 2]: blocked reason from stderr\n\n\nOriginal prompt: hello world",
+        promptSubmitEnding: {
+          ending: { kind: 'blocked_by_hook', reason: 'blocked reason from stderr' },
+          promptKept: false
+        }
+      }
+    },
+    {
+      // Older CLIs report the outcome as the bare sentence without the structured ending.
+      name: 'sentence-only row',
+      row: {
+        ...HOOK_BLOCKED_ROW,
+        uuid: 'sentence-only-row',
+        promptSubmitEnding: undefined
+      }
+    }
+  ])('treats a hook-blocked prompt notice as the turn end ($name)', ({ row }) => {
+    expect(decodeClaudeTurnLifecycle(JSON.stringify(row), 'fallback')).toEqual({
+      state: 'interrupted',
+      turnId: String(row.uuid),
+      timestamp: Date.parse('2026-10-29T13:21:22.447Z')
+    })
+  })
+
+  it('keeps informational rows without a hook outcome as non-events', () => {
+    expect(
+      decodeClaudeTurnLifecycle(
+        JSON.stringify({
+          ...HOOK_BLOCKED_ROW,
+          uuid: 'plain-warning-row',
+          content: 'Context is running low',
+          preventContinuation: false,
+          promptSubmitEnding: undefined
+        }),
+        'fallback'
+      )
+    ).toBeNull()
+    expect(
+      decodeClaudeTurnLifecycle(
+        JSON.stringify({
+          ...HOOK_BLOCKED_ROW,
+          uuid: 'unknown-ending-row',
+          promptSubmitEnding: { ending: { kind: 'noted_by_hook', reason: 'noted' } }
+        }),
+        'fallback'
+      )
+    ).toBeNull()
+  })
 })
