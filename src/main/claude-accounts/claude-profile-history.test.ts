@@ -63,21 +63,37 @@ describe('Claude profile history sharing', () => {
       expect(fs.readFileSync(join(f.profileHome, 'projects/later.jsonl'), 'utf8')).toBe('later')
     }
   )
+  itLinks("keeps an earlier build's sessions link now that the registry is shared", async () => {
+    const f = fixture()
+    fs.mkdirSync(join(f.defaultHome, 'sessions'))
+    fs.writeFileSync(join(f.defaultHome, 'sessions/123.json'), 'default session')
+    fs.symlinkSync(join(f.defaultHome, 'sessions'), join(f.profileHome, 'sessions'))
+    expect((await f.share()).surfaces.sessions).toBe('unchanged')
+    expect(fs.lstatSync(join(f.profileHome, 'sessions')).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(join(f.defaultHome, 'sessions/123.json'), 'utf8')).toBe(
+      'default session'
+    )
+  })
   itLinks(
-    "keeps Claude's live sessions per folder and undoes an earlier build's link",
+    "merges the profile's live registry into the shared one so both roots see it",
     async () => {
       const f = fixture()
       fs.mkdirSync(join(f.defaultHome, 'sessions'))
-      fs.writeFileSync(join(f.defaultHome, 'sessions/123.json'), 'default daemon')
-      fs.symlinkSync(join(f.defaultHome, 'sessions'), join(f.profileHome, 'sessions'))
-      expect((await f.share()).surfaces.sessions).toBe('synced')
-      expect(fs.existsSync(join(f.profileHome, 'sessions'))).toBe(false)
-      expect(fs.readFileSync(join(f.defaultHome, 'sessions/123.json'), 'utf8')).toBe(
-        'default daemon'
-      )
+      fs.writeFileSync(join(f.defaultHome, 'sessions/123.json'), 'default session')
       fs.mkdirSync(join(f.profileHome, 'sessions'))
-      expect((await f.share()).surfaces.sessions).toBe('unchanged')
-      expect(fs.lstatSync(join(f.profileHome, 'sessions')).isSymbolicLink()).toBe(false)
+      fs.writeFileSync(join(f.profileHome, 'sessions/456.json'), 'profile session')
+      const report = await f.share()
+      expect(report.surfaces.sessions).toBe('linked')
+      expect(fs.realpathSync(join(f.profileHome, 'sessions'))).toBe(
+        fs.realpathSync(join(f.defaultHome, 'sessions'))
+      )
+      expect(fs.readFileSync(join(f.defaultHome, 'sessions/456.json'), 'utf8')).toBe(
+        'profile session'
+      )
+      fs.writeFileSync(join(f.profileHome, 'sessions/789.json'), 'launched later')
+      expect(fs.readFileSync(join(f.defaultHome, 'sessions/789.json'), 'utf8')).toBe(
+        'launched later'
+      )
     }
   )
   itLinks('recovers a directory swap interrupted before link publication', async () => {
