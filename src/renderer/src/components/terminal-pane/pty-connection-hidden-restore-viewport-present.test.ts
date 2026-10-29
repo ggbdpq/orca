@@ -163,7 +163,29 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     return refresh
   }
 
-  async function connectHiddenClaudePane(overrides: Record<string, unknown> = {}) {
+  // xterm parks rendering behind _renderService._isPaused while a pane is hidden, and a
+  // reveal can beat the IntersectionObserver that would unpause it (#33684). The restore's
+  // present must release that latch itself and full-present (terminal-render-pause-release.ts).
+  function attachPausedRenderService(pane: ReturnType<typeof createPane>): {
+    _isPaused: boolean
+    _needsFullRefresh: boolean
+    _pausedResizeTask: { flush: ReturnType<typeof vi.fn> } | null
+    refreshRows: ReturnType<typeof vi.fn>
+  } {
+    const service = {
+      _isPaused: true,
+      _needsFullRefresh: true,
+      _pausedResizeTask: { flush: vi.fn() },
+      refreshRows: vi.fn()
+    }
+    Object.assign(pane.terminal, { _core: { _renderService: service } })
+    return service
+  }
+
+  async function connectHiddenClaudePane(
+    overrides: Record<string, unknown> = {},
+    options: { pausedRenderService?: boolean } = {}
+  ) {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport('pty-id')
     let onData: ConnectCallbacks['onData']
@@ -174,12 +196,14 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     transportFactoryQueue.push(transport)
     const pane = createPane(1)
     const refresh = attachRefreshSpy(pane)
+    const renderService =
+      options.pausedRenderService === true ? attachPausedRenderService(pane) : null
     const isVisibleRef = { current: false }
     const deps = createDeps({ isVisibleRef, startup: { command: 'codex' }, ...overrides })
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fixture mocks are structurally partial bags; every sibling pty-connection suite binds them the same way.
     const disposable = connectPanePty(pane as never, createManager(1) as never, deps as never)
     await flushAsyncTicks(6)
-    return { pane, refresh, onData: onData!, isVisibleRef, disposable, deps }
+    return { pane, refresh, renderService, onData: onData!, isVisibleRef, disposable, deps }
   }
 
   const hiddenChunk = 'hidden-before-flood\r\n'
@@ -222,6 +246,8 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     expect(getSnapshot).toHaveBeenCalledTimes(1)
 
     expectPresentAfterLastWrite(pane, refresh)
+    // The plain fixture carries no render service, so this present degraded to the refresh fallback.
+    expect(refresh).toHaveBeenCalledWith(0, pane.terminal.rows - 1)
 
     snapshotDeferred.resolve({ data: 'late\r\n', cols: 120, rows: 40, seq: 128 })
     await flushAsyncTicks(20)
@@ -254,6 +280,61 @@ describe('connectPanePty hidden-output restore viewport present', () => {
     await flushAsyncTicks(30)
 
     expectPresentAfterLastWrite(pane, refresh)
+    // The plain fixture carries no render service, so this present degraded to the refresh fallback.
+    expect(refresh).toHaveBeenCalledWith(0, pane.terminal.rows - 1)
+    disposable.dispose()
+  })
+
+  it('releases the paused render latch and requests the full repaint after the deadline abandon drains its last byte', async () => {
+    const getSnapshot = vi.mocked(window.api.pty.getMainBufferSnapshot)
+    // Same reporter's busy-spinner shape as the fallback twin above, but the hidden pane's
+    // render service is paused: xterm parks rendering while hidden and the reveal races the
+    // IntersectionObserver that would unpause it, so the drain's present must release the
+    // latch itself and full-present instead of degrading to refresh.
+    const snapshotDeferred = createDeferred<{
+      data: string
+      cols: number
+      rows: number
+      seq: number
+    }>()
+    getSnapshot.mockReturnValueOnce(snapshotDeferred.promise)
+    const { pane, refresh, renderService, onData, isVisibleRef, disposable } =
+      await connectHiddenClaudePane({}, { pausedRenderService: true })
+    const service = renderService!
+
+    onData?.(hiddenChunk, { seq: hiddenChunk.length, rawLength: hiddenChunk.length })
+    const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
+    _dispatchPtyModelRestoreNeededForTest({
+      id: 'pty-id',
+      reason: 'hidden-drop',
+      markerSeq: 64
+    })
+    isVisibleRef.current = true
+    await flushAsyncTicks(30)
+
+    vi.useFakeTimers()
+    try {
+      // Queue the live chunk under the virtual clock so the 750ms foreground deadline it
+      // arms is fake-timer driven, then let the deadline abandon and drain.
+      onData?.(liveChunk, { seq: 96, rawLength: liveChunk.length })
+      await vi.advanceTimersByTimeAsync(800)
+      await flushAsyncTicks(30)
+    } finally {
+      vi.useRealTimers()
+    }
+    await flushAsyncTicks(30)
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+
+    expectPresentAfterLastWrite(pane, service.refreshRows)
+    // The paused present released the latch itself instead of waiting for the observer.
+    expect(service._isPaused).toBe(false)
+    expect(service._needsFullRefresh).toBe(false)
+    expect(service._pausedResizeTask?.flush).toHaveBeenCalled()
+    // The present went through the render service, not the refresh fallback.
+    expect(refresh).not.toHaveBeenCalled()
+
+    snapshotDeferred.resolve({ data: 'late\r\n', cols: 120, rows: 40, seq: 128 })
+    await flushAsyncTicks(20)
     disposable.dispose()
   })
 })
