@@ -27,6 +27,7 @@ function refitHarness(cellWidth: number) {
     resetZoom: vi.fn(),
     cancelSelect: vi.fn(),
     doSelectAll: vi.fn(),
+    returnToPrompt: vi.fn(),
     awaitReady: vi.fn(async () => {})
   }
   const viewportRef: { current: TerminalViewportDims | null } = { current: { cols: 55, rows: 47 } }

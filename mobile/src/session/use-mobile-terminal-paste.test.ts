@@ -58,6 +58,7 @@ describe('mobile clipboard image followed by typing', () => {
         onSuccess: vi.fn(),
         ptyModesRef: { current: new Map() },
         refreshCanPaste: vi.fn(),
+        terminalRefs: { current: new Map() },
         showToast: vi.fn()
       })
       await paste()
@@ -115,6 +116,7 @@ describe('mobile clipboard image followed by typing', () => {
         onSuccess,
         ptyModesRef: { current: new Map() },
         refreshCanPaste: vi.fn(),
+        terminalRefs: { current: new Map() },
         showToast: vi.fn()
       })
       const pending = paste()
@@ -186,6 +188,7 @@ describe('mobile clipboard text paste', () => {
         ])
       },
       refreshCanPaste: vi.fn(),
+      terminalRefs: { current: new Map() },
       showToast: vi.fn()
     })
     try {

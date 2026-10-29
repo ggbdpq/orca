@@ -44,6 +44,8 @@ type TerminalLiveInputCommitOptions<TTabType extends string> = {
   readonly liveInputTerminalHandles: ReadonlySet<string>
   readonly liveInputTerminalHandlesRef: RefObject<Set<string>>
   readonly sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender>
+  // Accepted submit/key-press sends pull a scrollback-reading view back to the prompt (clicks never do).
+  readonly onTerminalInputSent?: (handle: string) => void
   readonly setLiveInputCapture: (text: string) => void
 }
 
@@ -72,6 +74,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   liveInputTerminalHandles,
   liveInputTerminalHandlesRef,
   sendLiveTerminalInputRef,
+  onTerminalInputSent,
   setLiveInputCapture
 }: TerminalLiveInputCommitOptions<TTabType>): TerminalLiveInputCommitHandlers {
   const liveInputInteractionGenerationRef = useRef(0)
@@ -119,6 +122,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     onFieldSessionEnded: recordEndedSession,
     onSendFailure,
     sendLiveTerminalInputRef,
+    onTerminalInputSent,
     setLiveInputCapture: updateLiveInputCapture
   })
 
@@ -265,10 +269,18 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
         case 'local-edit':
           return
         case 'send-now':
-          void queueLiveInputControl(activeHandle, decision.bytes)
+          void queueLiveInputControl(activeHandle, decision.bytes).then((sent) => {
+            if (sent) {
+              onTerminalInputSent?.(activeHandle)
+            }
+          })
           return
         case 'commit-held-then-send':
-          void endFieldSessionThenSend(activeHandle, decision.bytes)
+          void endFieldSessionThenSend(activeHandle, decision.bytes).then((sent) => {
+            if (sent) {
+              onTerminalInputSent?.(activeHandle)
+            }
+          })
           return
         default:
           decision satisfies never
@@ -281,6 +293,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       endFieldSessionThenSend,
       liveInputRef,
       liveInputTerminalHandles,
+      onTerminalInputSent,
       queueLiveInputControl
     ]
   )
@@ -296,6 +309,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     liveInputTextRef,
     liveInputTerminalHandles,
     onInteraction: advanceLiveInputInteractionGeneration,
+    onTerminalInputSent,
     pendingLiveInputHandleRef,
     queueLiveInputControl,
     sentLiveInputTextRef,
@@ -307,8 +321,14 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     if (!activeHandle || !liveInputTerminalHandles.has(activeHandle)) {
       return Promise.resolve(false)
     }
-    return endFieldSessionThenSend(activeHandle, '\r')
-  }, [activeHandle, endFieldSessionThenSend, liveInputTerminalHandles])
+    return endFieldSessionThenSend(activeHandle, '\r').then((sent) => {
+      // Enter from the live field ends scrollback reading; clicks share the sender but never this entry.
+      if (sent) {
+        onTerminalInputSent?.(activeHandle)
+      }
+      return sent
+    })
+  }, [activeHandle, endFieldSessionThenSend, liveInputTerminalHandles, onTerminalInputSent])
 
   return {
     clearPendingLiveInputCommit,

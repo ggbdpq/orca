@@ -82,6 +82,7 @@ function harness(phone: Terminal) {
     resetZoom: vi.fn(),
     cancelSelect: vi.fn(),
     doSelectAll: vi.fn(),
+    returnToPrompt: vi.fn(),
     awaitReady: vi.fn(async () => {})
   }
   const fields = {

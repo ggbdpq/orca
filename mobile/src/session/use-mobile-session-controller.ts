@@ -2,6 +2,7 @@ import { useNotificationPaneNavigation } from './use-notification-pane-navigatio
 import { useMobileSessionFoundation } from './use-mobile-session-foundation'
 import { useMobileSessionScreenState } from './use-mobile-session-screen-state'
 import { useMobileSessionTerminalRuntime } from './use-mobile-session-terminal-runtime'
+import { returnToPromptWhenSent } from '../terminal/return-terminal-to-prompt'
 import { useMobileSessionFeedbackCapabilities } from './use-mobile-session-feedback-capabilities'
 import { useMobileSessionNativeChatDictation } from './use-mobile-session-native-chat-dictation'
 import { useMobileSessionTerminalSubscriptionFoundation } from './use-mobile-session-terminal-subscription-foundation'
@@ -39,8 +40,13 @@ export function useMobileSessionController() {
     terminalRuntime,
     useMobileSessionFeedbackCapabilities(terminalRuntime)
   )
+  // Dictated text is typing: accepted sends return a scrollback-reading view to the prompt.
   const sendLiveTerminalInput = (handle: string, bytes: string) =>
-    feedbackCapabilities.sendLiveTerminalInputRef.current(handle, bytes)
+    returnToPromptWhenSent(
+      feedbackCapabilities.sendLiveTerminalInputRef.current(handle, bytes),
+      feedbackCapabilities.terminalRefs,
+      handle
+    )
   const nativeChatDictation = Object.assign(
     feedbackCapabilities,
     useMobileSessionNativeChatDictation(feedbackCapabilities, sendLiveTerminalInput)

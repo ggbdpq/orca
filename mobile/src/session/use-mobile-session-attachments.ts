@@ -70,7 +70,8 @@ export function useMobileSessionAttachments(scope: MobileSessionAccessorySelecti
     onSuccess: triggerSelection,
     ptyModesRef,
     refreshCanPaste,
-    showToast
+    showToast,
+    terminalRefs
   })
 
   const flushPendingLiveInputBeforeAttachmentSend = useMobileAttachmentInputLeaseGate({

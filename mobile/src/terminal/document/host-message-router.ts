@@ -6,6 +6,7 @@ import { emitKeyboardAvoidanceMetrics } from './keyboard-avoidance-metrics'
 import { emitModesIfChanged } from './mode-mirroring'
 import { reflow } from './reflow'
 import { resumeTerminalDataReplyAuthority } from './query-reply'
+import { returnToPrompt } from './return-to-prompt'
 import { repositionOverlay } from './selection-overlay'
 import { cancelSelect } from './selection-mode'
 import { resetEvictionCounter } from './selection-state-and-eviction'
@@ -125,6 +126,8 @@ export function handleMsg(scope: TerminalDocumentScope, msg: TerminalHostMessage
     }
   } else if (msg.type === 'set-theme') {
     applyTerminalTheme(scope, msg.terminalTheme)
+  } else if (msg.type === 'return-to-prompt') {
+    returnToPrompt(scope)
   } else if (msg.type === 'cancel-select') {
     if (scope.selMode === 'select') {
       cancelSelect(scope)

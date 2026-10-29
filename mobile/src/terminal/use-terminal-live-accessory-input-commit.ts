@@ -38,6 +38,8 @@ type TerminalLiveAccessoryInputCommitOptions = {
   readonly onInteraction: () => void
   readonly pendingLiveInputHandleRef: RefObject<string | null>
   readonly queueLiveInputControl: (handle: string, bytes: string) => Promise<boolean>
+  // Accepted accessory sends pull a scrollback-reading view back to the prompt.
+  readonly onTerminalInputSent?: (handle: string) => void
   readonly sentLiveInputTextRef: RefObject<string>
   readonly setLiveInputCapture: (text: string) => void
   readonly waitForPendingLiveInputFlush: () => Promise<boolean>
@@ -79,6 +81,7 @@ export function useTerminalLiveAccessoryInputCommit({
   onInteraction,
   pendingLiveInputHandleRef,
   queueLiveInputControl,
+  onTerminalInputSent,
   sentLiveInputTextRef,
   setLiveInputCapture,
   waitForPendingLiveInputFlush
@@ -107,6 +110,9 @@ export function useTerminalLiveAccessoryInputCommit({
           const sent = await (terminalLiveAccessoryInputEndsLine(input.bytes)
             ? endLiveInputSessionThenSend(activeHandle, input.bytes)
             : queueLiveInputControl(activeHandle, input.bytes))
+          if (sent) {
+            onTerminalInputSent?.(activeHandle)
+          }
           return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
         case 'local-edit': {
@@ -135,10 +141,16 @@ export function useTerminalLiveAccessoryInputCommit({
             normalizeTerminalTextInput(editedText),
             liveInputComposingRef.current
           )
+          if (sent) {
+            onTerminalInputSent?.(activeHandle)
+          }
           return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
         case 'commit-held-then-send': {
           const sent = await endLiveInputSessionThenSend(activeHandle, decision.bytes)
+          if (sent) {
+            onTerminalInputSent?.(activeHandle)
+          }
           return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
         default:
@@ -157,6 +169,7 @@ export function useTerminalLiveAccessoryInputCommit({
       liveInputTextRef,
       liveInputTerminalHandles,
       onInteraction,
+      onTerminalInputSent,
       pendingLiveInputHandleRef,
       queueLiveInputControl,
       sentLiveInputTextRef,

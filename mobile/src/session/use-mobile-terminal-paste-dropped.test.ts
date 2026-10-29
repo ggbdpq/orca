@@ -62,6 +62,7 @@ function setup() {
     onSuccess: vi.fn(),
     ptyModesRef: { current: new Map() },
     refreshCanPaste: vi.fn(),
+    terminalRefs: { current: new Map() },
     showToast
   }
   return {

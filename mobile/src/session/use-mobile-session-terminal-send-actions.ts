@@ -22,6 +22,7 @@ import { useAgentSendKeyboardDismissal } from './use-agent-send-keyboard-dismiss
 import type { MobileSessionTab } from './mobile-session-route-types'
 import { useMobileSessionTabActionSheetOpener } from './use-mobile-session-tab-action-targets'
 import type { MobileSessionTerminalWebviewModel } from './use-mobile-session-terminal-webview'
+import { returnTerminalToPrompt } from '../terminal/return-terminal-to-prompt'
 
 export function useMobileSessionTerminalSendActions(scope: MobileSessionTerminalWebviewModel) {
   const {
@@ -137,6 +138,8 @@ export function useMobileSessionTerminalSendActions(scope: MobileSessionTerminal
       const accepted = terminalInputSend.interpret(response) === true
       if (accepted) {
         reportWorkerTerminalUserInput(client, activeHandle)
+        // A sent command ends scrollback reading; bring the prompt and its echo back into view.
+        returnTerminalToPrompt(scope.terminalRefs, activeHandle)
       }
       if (!accepted) {
         restoreRejectedDraft()

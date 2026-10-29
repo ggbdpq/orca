@@ -11,6 +11,7 @@ import { reopensFocusedInputWhenKeyboardHidden } from '../terminal/terminal-live
 import type { TerminalLiveInputSender } from '../terminal/terminal-live-input-sender'
 import type { TerminalLiveInputFailure } from '../terminal/terminal-live-pending-flush-state'
 import { useTerminalLiveInputCommit } from '../terminal/use-terminal-live-input-commit'
+import { returnTerminalToPrompt } from '../terminal/return-terminal-to-prompt'
 import { resolveMobileTerminalInputGate } from '../terminal/terminal-input-connection-gate'
 import { createInitialSessionAutoCreateState } from './use-initial-session-terminal-autocreate'
 import { TerminalViewportResubscribeBudget } from './mobile-terminal-viewport-resubscribe'
@@ -131,6 +132,11 @@ export function useMobileSessionTerminalRuntime(scope: MobileSessionScreenStateM
     (handle: string): boolean => ptyModesRef.current.get(handle)?.bracketedPasteMode === true,
     []
   )
+  // Typing, accessory keys and composer sends pull a scrollback-reading view back to the prompt.
+  const returnToPromptOnInputSent = useCallback(
+    (handle: string) => returnTerminalToPrompt(terminalRefs, handle),
+    []
+  )
   const {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
@@ -152,6 +158,7 @@ export function useMobileSessionTerminalRuntime(scope: MobileSessionScreenStateM
     liveInputTerminalHandles,
     liveInputTerminalHandlesRef,
     sendLiveTerminalInputRef,
+    onTerminalInputSent: returnToPromptOnInputSent,
     setLiveInputCapture
   })
   const inputGate = resolveMobileTerminalInputGate({

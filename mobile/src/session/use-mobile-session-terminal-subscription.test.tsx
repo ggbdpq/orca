@@ -51,6 +51,7 @@ function subscriptionHarness(opts: {
     resetZoom: vi.fn(),
     cancelSelect: vi.fn(),
     doSelectAll: vi.fn(),
+    returnToPrompt: vi.fn(),
     awaitReady: vi.fn(async () => {})
   }
   let currentTerminal: TerminalWebViewHandle | undefined = terminal

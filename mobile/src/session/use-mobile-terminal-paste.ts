@@ -8,7 +8,8 @@ import { useCallback, type RefObject } from 'react'
 import { translate } from '../i18n/mobile-i18n'
 import { terminalInputSend } from '../terminal/mobile-terminal-operations'
 import { useClipboardReader } from '../platform/clipboard'
-import type { TerminalModes } from '../terminal/terminal-webview-contract'
+import type { TerminalModes, TerminalWebViewHandle } from '../terminal/terminal-webview-contract'
+import { returnTerminalToPrompt } from '../terminal/return-terminal-to-prompt'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
 import {
@@ -45,6 +46,8 @@ type UseMobileTerminalPasteOptions = {
   readonly onSuccess: () => void
   readonly ptyModesRef: RefObject<Map<string, TerminalModes>>
   readonly refreshCanPaste: () => void
+  // Accepted pastes pull a scrollback-reading view back to the prompt.
+  readonly terminalRefs: RefObject<Map<string, TerminalWebViewHandle>>
   readonly showToast: (message: string, durationMs?: number) => void
 }
 
@@ -65,7 +68,8 @@ export function useMobileTerminalPaste({
   onSuccess,
   ptyModesRef,
   refreshCanPaste,
-  showToast
+  showToast,
+  terminalRefs
 }: UseMobileTerminalPasteOptions): () => Promise<void> {
   // Read images through native media handles: inline clipboard base64 can exceed the bridge reply cap.
   const clipboard = useClipboardReader()
@@ -158,6 +162,8 @@ export function useMobileTerminalPaste({
       })
       if (terminalInputSend.interpret(response) === true) {
         reportWorkerTerminalUserInput(currentClient, targetHandle)
+        // Pasted text reaching the PTY ends scrollback reading, like desktop's data-event scroll.
+        returnTerminalToPrompt(terminalRefs, targetHandle)
       }
       onSuccess()
       refreshCanPaste()

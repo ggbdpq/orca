@@ -122,6 +122,8 @@ export type TerminalWebViewHandle = {
   resetZoom: () => void
   cancelSelect: () => void
   doSelectAll: () => void
+  // Pull a scrollback-reading view back to the prompt after user-authored input leaves it.
+  returnToPrompt: () => void
   // Await the latest init’s ready notification so follow-up fitting uses its post-layout cell box.
   awaitReady: () => Promise<void>
 }

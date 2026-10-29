@@ -31,6 +31,8 @@ type TerminalLivePendingInputFlushOptions<TTabType extends string> = {
   readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandlesRef: RefObject<Set<string>>
   readonly sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender>
+  // Accepted typed-text mirror sends pull a scrollback-reading view back to the prompt.
+  readonly onTerminalInputSent?: (handle: string) => void
   readonly setLiveInputCapture: (text: string) => void
 }
 
@@ -67,6 +69,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   liveInputRef,
   liveInputTerminalHandlesRef,
   sendLiveTerminalInputRef,
+  onTerminalInputSent,
   setLiveInputCapture
 }: TerminalLivePendingInputFlushOptions<TTabType>): TerminalLivePendingInputFlush {
   const heldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -202,7 +205,13 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
         setLiveInputCapture('')
         writeTerminalLiveInputText(liveInputRef, '')
       }
-      return sent
+      // Typed text reaching the PTY ends scrollback reading, mirroring desktop's scrollOnUserInput.
+      return sent.then((delivered) => {
+        if (delivered) {
+          onTerminalInputSent?.(handle)
+        }
+        return delivered
+      })
     },
     [
       activeHandleRef,

@@ -287,6 +287,9 @@ export function useTerminalWebViewController(
       doSelectAll() {
         postMessage({ type: 'do-select-all' })
       },
+      returnToPrompt() {
+        postMessage({ type: 'return-to-prompt' })
+      },
       awaitReady: promises.awaitReady
     }),
     [
