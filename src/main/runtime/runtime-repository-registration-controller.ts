@@ -34,17 +34,19 @@ type RuntimeRepositoryRegistrationDependencies = {
 }
 
 // Why: a trailing space is a legal directory name (Google Drive exports them), so a
-// picker-returned parent that exists exactly as requested wins; the trim stays only
-// for typed typos. Only a genuinely absent raw spelling may fall back to the trim —
-// other probe failures must surface instead of silently relocating the project.
+// picker-returned parent that exists as a directory exactly as requested wins; the
+// trim stays only for typed typos and raw spellings naming a non-directory (a file).
+// Other probe failures must surface instead of silently relocating the project.
 async function resolveCreateParentPathRawFirst(requestedPath: string): Promise<string> {
   const trimmed = requestedPath.trim()
   if (!trimmed || trimmed === requestedPath) {
     return trimmed
   }
   try {
-    await stat(requestedPath)
-    return requestedPath
+    if ((await stat(requestedPath)).isDirectory()) {
+      return requestedPath
+    }
+    return trimmed
   } catch (error) {
     if (!isENOENT(error)) {
       throw error

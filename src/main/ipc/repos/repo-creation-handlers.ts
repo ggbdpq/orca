@@ -1,7 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, readdir, rm } from 'node:fs/promises'
+import { access, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import type { Store } from '../../persistence'
@@ -65,15 +65,18 @@ function isAbsentPathError(err: unknown): boolean {
 }
 
 // Why: a trailing space is a legal POSIX directory name (Google Drive exports them), so a
-// picker-returned parent that exists exactly as typed wins; the trim stays only for typed typos.
+// picker-returned parent that exists as a directory exactly as typed wins; the trim stays
+// only for typed typos and raw spellings naming a non-directory (a file).
 async function resolveCreateParentPath(requestedPath: string): Promise<string> {
   const trimmed = requestedPath.trim()
   if (!trimmed || trimmed === requestedPath) {
     return trimmed
   }
   try {
-    await access(requestedPath)
-    return requestedPath
+    if ((await stat(requestedPath)).isDirectory()) {
+      return requestedPath
+    }
+    return trimmed
   } catch (err) {
     if (!isAbsentPathError(err)) {
       throw err

@@ -70,6 +70,18 @@ describe('RuntimeRepositoryRegistrationController.create parent resolution', () 
     }
   })
 
+  it('falls back to the trimmed directory when the raw spelling names a file', async () => {
+    const trimmedDir = join(base, 'real dir')
+    mkdirSync(trimmedDir)
+    // The raw spelling exists but is a file; only a directory parent may win raw-first.
+    writeFileSync(`${trimmedDir} `, 'a file, not a directory')
+    const result = await makeController().create(`${trimmedDir} `, 'kid', 'folder')
+    expect('error' in result && result.error).toBeFalsy()
+    if (!('error' in result)) {
+      expect(result.repo.path).toBe(join(trimmedDir, 'kid'))
+    }
+  })
+
   it('surfaces a non-absent probe failure instead of creating at the trimmed spelling', async () => {
     const blocker = join(base, 'blocker')
     writeFileSync(blocker, 'a file, not a directory')
